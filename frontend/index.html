@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片批量处理工具</title>
+    <link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <path d="M21 15l-5-5L5 21"/>
+            </svg>
+            <h1>图片批量处理</h1>
+        </div>
+        <div class="header-right">
+            <span class="image-counter" id="imageCountWrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                <span id="imageCount">0 张图片</span>
+            </span>
+            <button class="btn btn-ghost btn-icon" onclick="openSettings()" title="设置">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+        <!-- Left Panel: Upload & Settings -->
+        <aside class="side-panel">
+            <!-- Upload Section -->
+            <section class="card upload-section">
+                <div class="card-header">
+                    <span class="step-badge">1</span>
+                    <h2>上传图片</h2>
+                </div>
+                <div class="upload-zone" id="uploadZone">
+                    <input type="file" id="fileInput" multiple accept="image/*" style="display:none">
+                    <div class="upload-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </div>
+                    <p class="upload-text">拖拽图片到此处，或 <span class="link">点击选择</span></p>
+                    <p class="upload-hint">支持 JPG、PNG、WEBP、BMP、TIFF，单文件最大 50MB</p>
+                </div>
+                <div class="upload-progress" id="uploadProgress">
+                    <div class="progress-track">
+                        <div class="progress-fill" id="uploadProgressFill" style="width:0%"></div>
+                    </div>
+                    <div class="progress-text" id="uploadProgressText">上传中...</div>
+                </div>
+                <div class="image-grid" id="imageGrid"></div>
+            </section>
+
+            <!-- Settings Section -->
+            <section class="card settings-section">
+                <div class="card-header">
+                    <span class="step-badge">2</span>
+                    <h2>处理设置</h2>
+                </div>
+
+                <!-- Feature Toggle: 去除背景 -->
+                <div class="feature-item feature-item--active" id="featureBgRemoval">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableBgRemoval" checked>
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableBgRemoval').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                            </svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">去除背景（抠图）</span>
+                            <span class="feature-desc">智能识别主体，移除背景</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('bg')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params" id="bgSection">
+                    <div class="param-row param-row--full">
+                        <div class="param-group">
+                            <label>抠图方式</label>
+                            <select id="bgMethod">
+                                <option value="local">本地模型</option>
+                                <option value="api">remove.bg API</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="param-row param-row--full" id="localModelRow">
+                        <div class="param-group">
+                            <label>选择模型</label>
+                            <select id="bgModel">
+                                <option value="rmbg-1.4">RMBG-1.4 · 快速稳定 · 通用推荐</option>
+                                <option value="birefnet">BiRefNet · 毛发细节 · 复杂场景</option>
+                                <option value="rmbg-2.0">RMBG-2.0 · 边缘干净 · 质量优先</option>
+                                <option value="u2net">U2Net · 经典模型 · 兼容性广</option>
+                            </select>
+                            <p class="param-hint">首次使用需下载模型文件 (约 300MB-1GB)</p>
+                        </div>
+                    </div>
+                    <div class="param-row hidden" id="apiKeyRow">
+                        <div class="param-group param-group--full">
+                            <label>API Key</label>
+                            <input type="text" id="apiKey" placeholder="输入你的 API Key">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Toggle: Logo -->
+                <div class="feature-item" id="featureLogo">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableLogo">
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableLogo').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <path d="M3 9h18"/>
+                                <path d="M9 21V9"/>
+                            </svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">添加 Logo</span>
+                            <span class="feature-desc">图片型标识，压在角落</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('logo')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params hidden" id="logoSection">
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>Logo 来源</label>
+                            <select id="logoMode">
+                                <option value="default">使用默认 Logo</option>
+                                <option value="image">上传自定义 Logo</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="param-row hidden" id="logoUploadGroup">
+                        <div class="logo-upload-area">
+                            <div class="logo-preview" id="logoPreview">
+                                <span class="placeholder">+</span>
+                            </div>
+                            <input type="file" accept="image/*" onchange="handleLogoUpload(this.files)">
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>位置</label>
+                            <div class="position-grid" id="positionGrid"></div>
+                        </div>
+                        <div class="param-group">
+                            <label>大小比例</label>
+                            <div class="range-row">
+                                <input type="range" id="logoRatio" min="5" max="50" value="15" step="1">
+                                <span class="value" id="logoRatioVal">15%</span>
+                            </div>
+                            <label style="margin-top:8px">透明度</label>
+                            <div class="range-row">
+                                <input type="range" id="logoOpacity" min="0" max="100" value="80" step="5">
+                                <span class="value" id="logoOpacityVal">80%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="logoTile">
+                            <span class="checkbox-custom"></span>
+                            平铺模式（整图重复 Logo）
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Feature Toggle: 显式水印 -->
+                <div class="feature-item" id="featureWatermark">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableWatermark">
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableWatermark').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M12 20h9"/>
+                                <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                            </svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">显式水印</span>
+                            <span class="feature-desc">文字型水印，可选疏散或密集</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('watermark')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params hidden" id="watermarkSection">
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>水印模式</label>
+                            <select id="wmMode">
+                                <option value="sparse">疏散（文字小而淡）</option>
+                                <option value="dense">密集（文字大而醒目）</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>水印文字</label>
+                            <input type="text" id="wmText" placeholder="输入水印文字">
+                        </div>
+                        <div class="param-group">
+                            <label>文字颜色</label>
+                            <select id="wmTextColor">
+                                <option value="#FFFFFF">白色</option>
+                                <option value="#000000">黑色</option>
+                                <option value="#888888">灰色</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>位置</label>
+                            <div class="position-grid" id="wmPositionGrid"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Toggle: 盲水印 -->
+                <div class="feature-item" id="featureBlindWatermark">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableBlindWatermark">
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableBlindWatermark').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                                <line x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">盲水印</span>
+                            <span class="feature-desc">LSB 隐写，肉眼完全不可见</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('blind')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params hidden" id="blindSection">
+                    <div class="param-row param-row--full">
+                        <div class="param-group">
+                            <label>嵌入文字（用于版权识别）</label>
+                            <input type="text" id="wmBlindText" placeholder="输入版权文字，如「原创图片-张三-2026」">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Toggle: 压缩输出 -->
+                <div class="feature-item" id="featureCompress">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableCompress">
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableCompress').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M4 14.899A7 7 0 1115.71 8h1.79a4.5 4.5 0 012.5 8.242"/>
+                                <path d="M12 12v9"/>
+                                <path d="M8 17l4 4 4-4"/>
+                            </svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">压缩输出</span>
+                            <span class="feature-desc">优化文件体积，支持多种格式</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('compress')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params hidden" id="compressSection">
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>输出格式</label>
+                            <select id="outputFormat">
+                                <option value="JPEG">JPEG</option>
+                                <option value="WEBP">WEBP</option>
+                                <option value="PNG">PNG</option>
+                            </select>
+                        </div>
+                        <div class="param-group">
+                            <label>质量</label>
+                            <div class="range-row">
+                                <input type="range" id="quality" min="1" max="100" value="85" step="1">
+                                <span class="value" id="qualityVal">85%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>最大文件 (KB，0=不限)</label>
+                            <input type="number" id="maxFileSize" value="0" min="0">
+                        </div>
+                        <div class="param-group">
+                            <label>最大宽度 (px，0=不限)</label>
+                            <input type="number" id="maxWidth" value="0" min="0">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Actions -->
+            <div class="action-area">
+                <button class="btn btn-primary btn-full start-btn" id="processBtn" onclick="startProcess()" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    开始处理
+                </button>
+            </div>
+        </aside>
+
+        <!-- Right Panel: Results -->
+        <section class="result-panel" id="progressPanel">
+            <div class="card result-header-card">
+                <div class="result-header-top">
+                    <div class="result-title-row">
+                        <div class="card-header">
+                            <span class="step-badge">3</span>
+                            <h2>处理结果</h2>
+                        </div>
+                        <div class="action-buttons action-buttons--inline">
+                            <button class="btn btn-ghost btn-sm" onclick="clearAll()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                全部清除
+                            </button>
+                            <button class="btn btn-success btn-sm hidden" id="downloadAllBtn" onclick="downloadAll()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                下载全部
+                            </button>
+                        </div>
+                    </div>
+                    <div class="progress-section hidden" id="progressSection">
+                        <div class="progress-bar-wrap">
+                            <div class="progress-track">
+                                <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                                <span class="progress-percent" id="progressPercent">0%</span>
+                            </div>
+                        </div>
+                        <div class="progress-status">
+                            <span id="progressText">准备中...</span>
+                            <button class="btn btn-danger btn-sm" onclick="cancelProcess()">取消</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="result-grid" id="resultGrid"></div>
+        </section>
+    </main>
+
+    <!-- Preview Modal -->
+    <div class="modal-overlay hidden" id="previewOverlay">
+        <div class="modal preview-modal">
+            <div class="modal-header">
+                <h3>图片预览</h3>
+                <button class="modal-close" onclick="closePreview()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body preview-body">
+                <div class="preview-col">
+                    <img id="previewOriginal" src="" alt="原图">
+                    <span class="preview-label">原图</span>
+                </div>
+                <div class="preview-col">
+                    <img id="previewProcessed" src="" alt="处理后">
+                    <span class="preview-label">处理后</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closePreview()">关闭</button>
+                <a class="btn btn-primary" id="previewDownloadBtn" href="#" download>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    下载
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Editor Modal -->
+    <div class="modal-overlay hidden" id="editorOverlay">
+        <div class="modal editor-modal">
+            <div class="modal-header">
+                <h3>手动编辑抠图</h3>
+                <button class="modal-close" onclick="closeEditor()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="editor-toolbar">
+                <button class="tool-btn active" id="toolErase" onclick="setTool('erase')">
+                    <span class="tool-icon erase-icon"></span> 擦除
+                </button>
+                <button class="tool-btn" id="toolKeep" onclick="setTool('keep')">
+                    <span class="tool-icon keep-icon"></span> 保留
+                </button>
+                <div class="tool-sep"></div>
+                <span class="tool-label">画笔</span>
+                <input type="range" id="brushSize" min="2" max="80" value="20" oninput="updateBrushSize(this.value)">
+                <span class="brush-val" id="brushSizeVal">20</span>
+                <div class="tool-sep"></div>
+                <button class="tool-btn" onclick="zoomInEditor()">＋</button>
+                <button class="tool-btn" onclick="zoomOutEditor()">－</button>
+                <span class="brush-val" id="editorZoomVal">100%</span>
+                <div class="tool-sep"></div>
+                <button class="tool-btn" onclick="undoEditor()">↩ 撤销</button>
+                <button class="tool-btn" onclick="resetEditor()">⟳ 重置</button>
+            </div>
+            <div class="editor-canvas-wrap">
+                <canvas id="editorCanvas"></canvas>
+                <div class="editor-hint">白色=保留前景 · 黑色=擦除背景</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeEditor()">取消</button>
+                <button class="btn btn-primary" onclick="saveMask()">应用编辑</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay hidden" id="settingsOverlay">
+        <div class="modal settings-modal">
+            <div class="modal-header">
+                <h3>设置</h3>
+                <button class="modal-close" onclick="closeSettings()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <h4>抠图设置</h4>
+                    <div class="param-row">
+                        <div class="param-group">
+                            <label>CPU 线程数限制（0=自动）</label>
+                            <input type="number" id="settingThreads" value="0" min="0" max="32">
+                            <p class="param-hint">控制 rembg 模型并行线程数，建议保留 1-2 核给系统</p>
+                        </div>
+                    </div>
+                    <div class="param-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="settingDisableArena" checked>
+                            <span class="checkbox-custom"></span>
+                            禁用 ONNX 内存预分配（减少 OOM）
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeSettings()">取消</button>
+                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/frontend/app.js"></script>
+</body>
+</html>
