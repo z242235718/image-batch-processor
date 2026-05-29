@@ -140,6 +140,11 @@ async def get_original(image_id: str):
     meta = image_store.get(image_id)
     if meta and os.path.exists(meta["path"]):
         return FileResponse(meta["path"])
+    # 如果内存记录已被删除，直接从磁盘查找文件
+    for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif']:
+        path = INPUT_DIR / f"{image_id}{ext}"
+        if path.exists():
+            return FileResponse(path)
     raise HTTPException(status_code=404, detail="原图不存在")
 
 

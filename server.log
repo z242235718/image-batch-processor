@@ -7,3 +7,5 @@ INFO:     Application startup complete.
 INFO:     127.0.0.1:1176 - "POST /api/upload HTTP/1.1" 200 OK
 INFO:     127.0.0.1:1178 - "POST /api/process HTTP/1.1" 200 OK
 INFO:     127.0.0.1:1180 - "POST /api/reprocess HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'backend\main.py'. Reloading...
+ 
