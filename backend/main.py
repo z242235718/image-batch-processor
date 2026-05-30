@@ -24,8 +24,16 @@ from backend.file_manager import save_uploaded_file, delete_result_files, get_ou
 from backend.utils.image_utils import generate_thumbnail
 from backend.processors.bg_remover import remove_background
 from backend.processors.logo_adder import add_logo
-from backend.processors.watermark import add_text_watermark_sparse, add_text_watermark_dense, add_blind_watermark
+from backend.processors.watermark import add_text_watermark, add_blind_watermark
 from backend.processors.compressor import compress_image
+
+
+def _save_png_lossless(image: Image.Image) -> bytes:
+    """保存为 PNG 并做最大无损压缩（保持透明通道，不失真）"""
+    buf = io.BytesIO()
+    image.save(buf, format="PNG", optimize=True, compress_level=9)
+    return buf.getvalue()
+
 
 app = FastAPI(title="图片批量处理工具")
 
@@ -180,7 +188,11 @@ async def process_images(
     wm_mode: str = Form("off"),
     wm_text: Optional[str] = Form(None),
     wm_text_color: str = Form("#FFFFFF"),
+    wm_text_ratio: float = Form(0.05),
+    wm_opacity: float = Form(0.5),
     wm_position: str = Form("right-bottom"),
+    wm_tile_direction: str = Form("horizontal"),
+    wm_dense_density: int = Form(5),
     wm_blind_enabled: bool = Form(False),
     wm_blind_text: Optional[str] = Form(None),
     compress_enabled: bool = Form(True),
@@ -213,7 +225,11 @@ async def process_images(
         "wm_mode": wm_mode,
         "wm_text": wm_text,
         "wm_text_color": wm_text_color,
+        "wm_text_ratio": wm_text_ratio,
+        "wm_opacity": wm_opacity,
         "wm_position": wm_position,
+        "wm_tile_direction": wm_tile_direction,
+        "wm_dense_density": wm_dense_density,
         "wm_blind_enabled": wm_blind_enabled,
         "wm_blind_text": wm_blind_text,
         "compress_enabled": compress_enabled,
@@ -279,21 +295,18 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                     )
 
                 # 3. 显式水印
-                if config["wm_mode"] == "sparse" and config["wm_text"]:
+                if config["wm_mode"] in ("position", "tile", "dense") and config["wm_text"]:
                     img = await asyncio.to_thread(
-                        add_text_watermark_sparse, img,
+                        add_text_watermark, img,
                         config["wm_text"],
                         config["wm_position"],
-                        0.04, 0.3,
+                        config["wm_text_ratio"],
+                        config["wm_opacity"],
                         config["wm_text_color"],
-                    )
-                elif config["wm_mode"] == "dense" and config["wm_text"]:
-                    img = await asyncio.to_thread(
-                        add_text_watermark_dense, img,
-                        config["wm_text"],
-                        config["wm_position"],
-                        0.12, 0.6,
-                        config["wm_text_color"],
+                        config["wm_mode"] == "tile" or config["wm_mode"] == "dense",
+                        config["wm_tile_direction"],
+                        config["wm_mode"] == "dense",
+                        config["wm_dense_density"],
                     )
 
                 # 4. 盲水印
@@ -312,9 +325,18 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         config["max_width"],
                     )
                 else:
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    data = buf.getvalue()
+                    fmt = config.get("output_format", "JPEG").upper()
+                    if fmt in ("JPEG", "JPG"):
+                        # JPEG: 用选中格式+高质量，避免 RGBA→PNG 体积爆炸
+                        data = await asyncio.to_thread(
+                            compress_image, img, fmt,
+                            max(config.get("quality", 85), 95), 0, 0,
+                        )
+                    else:
+                        # PNG/其他: 存为 PNG 并做最大无损压缩，保持透明度
+                        data = await asyncio.to_thread(
+                            lambda: _save_png_lossless(img)
+                        )
 
                 # 保存
                 ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
@@ -486,11 +508,16 @@ async def reprocess_image(
     logo_opacity: float = Form(0.8),
     logo_margin: int = Form(20),
     logo_tile: bool = Form(False),
+    logo_file_id: Optional[str] = Form(None),
     # 显式水印
     wm_mode: str = Form("off"),
     wm_text: Optional[str] = Form(None),
     wm_text_color: str = Form("#FFFFFF"),
+    wm_text_ratio: float = Form(0.05),
+    wm_opacity: float = Form(0.5),
     wm_position: str = Form("right-bottom"),
+    wm_tile_direction: str = Form("horizontal"),
+    wm_dense_density: int = Form(5),
     # 盲水印
     wm_blind_enabled: bool = Form(False),
     wm_blind_text: Optional[str] = Form(None),
@@ -523,17 +550,24 @@ async def reprocess_image(
 
     # 2. Logo
     if logo_enabled:
-        logo_path = ASSETS_DIR / "logo.png"
-        if logo_path.exists():
-            logo_img = Image.open(logo_path).convert("RGBA")
+        logo_img = None
+        if logo_file_id and logo_file_id in logo_store:
+            logo_img = Image.open(logo_store[logo_file_id]["path"]).convert("RGBA")
+        else:
+            logo_path = ASSETS_DIR / "logo.png"
+            if logo_path.exists():
+                logo_img = Image.open(logo_path).convert("RGBA")
+        if logo_img:
             from backend.processors.logo_adder import add_logo
             img = add_logo(img, logo_img, logo_position, logo_ratio, logo_opacity, margin=logo_margin, tile=logo_tile)
 
     # 3. 显式水印
-    if wm_mode == "sparse" and wm_text:
-        img = add_text_watermark_sparse(img, wm_text, wm_position, 0.04, 0.3, wm_text_color)
-    elif wm_mode == "dense" and wm_text:
-        img = add_text_watermark_dense(img, wm_text, wm_position, 0.12, 0.6, wm_text_color)
+    if wm_mode in ("position", "tile", "dense") and wm_text:
+        img = add_text_watermark(
+            img, wm_text, wm_position, wm_text_ratio, wm_opacity,
+            wm_text_color, wm_mode in ("tile", "dense"),
+            wm_tile_direction, wm_mode == "dense", wm_dense_density,
+        )
 
     # 4. 盲水印
     if wm_blind_enabled and wm_blind_text:
@@ -543,9 +577,13 @@ async def reprocess_image(
     if compress_enabled:
         data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
     else:
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        data = buf.getvalue()
+        fmt = output_format.upper() if output_format else "JPEG"
+        if fmt in ("JPEG", "JPG"):
+            # JPEG: 高质量保存，避免 RGBA→PNG 体积爆炸
+            data = compress_image(img, fmt, max(quality, 95), 0, 0)
+        else:
+            # PNG/其他: 无损压缩，保持透明度
+            data = _save_png_lossless(img)
 
     # 保存新结果
     new_run_id = f"reprocess-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -589,7 +627,11 @@ async def edit_mask(
     wm_mode: str = Form("off"),
     wm_text: Optional[str] = Form(None),
     wm_text_color: str = Form("#FFFFFF"),
+    wm_text_ratio: float = Form(0.05),
+    wm_opacity: float = Form(0.5),
     wm_position: str = Form("right-bottom"),
+    wm_tile_direction: str = Form("horizontal"),
+    wm_dense_density: int = Form(5),
     wm_blind_enabled: bool = Form(False),
     wm_blind_text: Optional[str] = Form(None),
     compress_enabled: bool = Form(True),
@@ -638,26 +680,27 @@ async def edit_mask(
                 )
 
         # 显式水印
-        if wm_mode == "sparse" and wm_text:
-            result_img = add_text_watermark_sparse(
-                result_img, wm_text, wm_position, 0.04, 0.3, wm_text_color,
-            )
-        elif wm_mode == "dense" and wm_text:
-            result_img = add_text_watermark_dense(
-                result_img, wm_text, wm_position, 0.12, 0.6, wm_text_color,
+        if wm_mode in ("position", "tile", "dense") and wm_text:
+            result_img = add_text_watermark(
+                result_img, wm_text, wm_position, wm_text_ratio, wm_opacity,
+                wm_text_color, wm_mode in ("tile", "dense"),
+                wm_tile_direction, wm_mode == "dense", wm_dense_density,
             )
 
-        # 盲水印
+        # 盲水印（必须用 PNG 保存，否则 LSB 数据会被 JPEG 压缩损坏）
         if wm_blind_enabled and wm_blind_text:
             result_img = add_blind_watermark(result_img, wm_blind_text)
+            output_format = "PNG"
 
         # 压缩
         if compress_enabled:
             data = compress_image(result_img, output_format, quality, max_file_size_kb, max_width)
         else:
-            buf = io.BytesIO()
-            result_img.save(buf, format="PNG")
-            data = buf.getvalue()
+            fmt = output_format.upper() if output_format else "JPEG"
+            if fmt in ("JPEG", "JPG"):
+                data = compress_image(result_img, fmt, max(quality, 95), 0, 0)
+            else:
+                data = _save_png_lossless(result_img)
 
         edit_run_id = f"edit-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}

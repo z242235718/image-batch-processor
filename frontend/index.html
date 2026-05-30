@@ -239,9 +239,26 @@
                         <div class="param-group">
                             <label>水印模式</label>
                             <select id="wmMode">
-                                <option value="sparse">疏散（文字小而淡）</option>
-                                <option value="dense">密集（文字大而醒目）</option>
+                                <option value="position">指定位置</option>
+                                <option value="tile">平铺</option>
+                                <option value="dense">密集型（肉眼不可见）</option>
                             </select>
+                        </div>
+                    </div>
+                    <div class="param-row" id="wmFontRow">
+                        <div class="param-group">
+                            <label>字体大小</label>
+                            <div class="range-row">
+                                <input type="range" id="wmTextRatio" min="1" max="20" value="5" step="1">
+                                <span class="value" id="wmTextRatioVal">5%</span>
+                            </div>
+                        </div>
+                        <div class="param-group">
+                            <label>透明度</label>
+                            <div class="range-row">
+                                <input type="range" id="wmOpacity" min="0" max="100" value="50" step="5">
+                                <span class="value" id="wmOpacityVal">50%</span>
+                            </div>
                         </div>
                     </div>
                     <div class="param-row">
@@ -251,17 +268,44 @@
                         </div>
                         <div class="param-group">
                             <label>文字颜色</label>
-                            <select id="wmTextColor">
-                                <option value="#FFFFFF">白色</option>
-                                <option value="#000000">黑色</option>
-                                <option value="#888888">灰色</option>
-                            </select>
+                            <div class="color-palette-wrap">
+                                <input type="hidden" id="wmTextColor" value="#FFFFFF">
+                                <div class="color-palette" id="wmColorPalette">
+                                    <div class="color-swatch" data-color="#CCCCCC" style="background-color:#CCCCCC" title="浅灰" onclick="selectPaletteColor(this,'wmTextColor')"></div>
+                                    <div class="color-swatch" data-color="#666666" style="background-color:#666666" title="深灰" onclick="selectPaletteColor(this,'wmTextColor')"></div>
+                                    <div class="color-swatch active" data-color="#FFFFFF" style="background-color:#FFFFFF;border:2px solid #ccc" title="白色" onclick="selectPaletteColor(this,'wmTextColor')"></div>
+                                    <div class="color-swatch" data-color="#000000" style="background-color:#000000" title="黑色" onclick="selectPaletteColor(this,'wmTextColor')"></div>
+                                    <div class="color-picker-btn" id="wmTextColorPickerBtn" title="自定义颜色">
+                                        <input type="color" id="wmTextColorPicker" value="#FFFFFF" onchange="selectPaletteColor(this,'wmTextColor')">
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="param-row">
+                    <div class="param-row" id="wmPositionRow">
                         <div class="param-group">
                             <label>位置</label>
                             <div class="position-grid" id="wmPositionGrid"></div>
+                        </div>
+                    </div>
+                    <div class="param-row hidden" id="wmDirectionRow">
+                        <div class="param-group">
+                            <label>平铺方向</label>
+                            <select id="wmTileDirection">
+                                <option value="horizontal">横排</option>
+                                <option value="diagonal">斜角 45°</option>
+                                <option value="vertical">竖排</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="param-row hidden" id="wmDenseRow">
+                        <div class="param-group">
+                            <label>密集程度</label>
+                            <div class="range-row">
+                                <input type="range" id="wmDenseDensity" min="1" max="10" value="5" step="1">
+                                <span class="value" id="wmDenseDensityVal">5</span>
+                            </div>
+                            <p class="param-hint">值越大字体越小、排列越密、越不可见</p>
                         </div>
                     </div>
                 </div>
@@ -704,8 +748,9 @@
                             <div class="param-group">
                                 <label>水印模式</label>
                                 <select id="reprocessWmMode">
-                                    <option value="sparse">疏散（文字小而淡）</option>
-                                    <option value="dense">密集（文字大而醒目）</option>
+                                    <option value="position">指定位置</option>
+                                    <option value="tile">平铺</option>
+                                    <option value="dense">密集型（肉眼不可见）</option>
                                 </select>
                             </div>
                         </div>
@@ -716,11 +761,34 @@
                             </div>
                             <div class="param-group">
                                 <label>文字颜色</label>
-                                <select id="reprocessWmTextColor">
-                                    <option value="#FFFFFF">白色</option>
-                                    <option value="#000000">黑色</option>
-                                    <option value="#888888">灰色</option>
-                                </select>
+                                <div class="color-palette-wrap">
+                                    <input type="hidden" id="reprocessWmTextColor" value="#FFFFFF">
+                                    <div class="color-palette">
+                                        <div class="color-swatch" data-color="#CCCCCC" style="background-color:#CCCCCC" title="浅灰" onclick="selectPaletteColor(this,'reprocessWmTextColor')"></div>
+                                        <div class="color-swatch" data-color="#666666" style="background-color:#666666" title="深灰" onclick="selectPaletteColor(this,'reprocessWmTextColor')"></div>
+                                        <div class="color-swatch active" data-color="#FFFFFF" style="background-color:#FFFFFF;border:2px solid #ccc" title="白色" onclick="selectPaletteColor(this,'reprocessWmTextColor')"></div>
+                                        <div class="color-swatch" data-color="#000000" style="background-color:#000000" title="黑色" onclick="selectPaletteColor(this,'reprocessWmTextColor')"></div>
+                                        <div class="color-picker-btn" id="reprocessWmTextColorPickerBtn" title="自定义颜色">
+                                        <input type="color" id="reprocessWmTextColorPicker" value="#FFFFFF" onchange="selectPaletteColor(this,'reprocessWmTextColor')">
+                                    </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="param-row" style="grid-template-columns:1fr 1fr">
+                            <div class="param-group">
+                                <label>字体大小</label>
+                                <div class="range-row">
+                                    <input type="range" id="reprocessWmTextRatio" min="1" max="20" value="5" step="1">
+                                    <span class="value" id="reprocessWmTextRatioVal">5%</span>
+                                </div>
+                            </div>
+                            <div class="param-group">
+                                <label>透明度</label>
+                                <div class="range-row">
+                                    <input type="range" id="reprocessWmOpacity" min="0" max="100" value="50" step="5">
+                                    <span class="value" id="reprocessWmOpacityVal">50%</span>
+                                </div>
                             </div>
                         </div>
                         <div class="param-row param-row--full">
@@ -737,6 +805,26 @@
                                     <option value="center-bottom">中下</option>
                                     <option value="right-bottom" selected>右下</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="param-row param-row--full hidden" id="reprocessWmDirectionRow">
+                            <div class="param-group">
+                                <label>平铺方向</label>
+                                <select id="reprocessWmTileDirection">
+                                    <option value="horizontal">横排</option>
+                                    <option value="diagonal">斜角 45°</option>
+                                    <option value="vertical">竖排</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="param-row param-row--full hidden" id="reprocessWmDenseRow">
+                            <div class="param-group">
+                                <label>密集程度</label>
+                                <div class="range-row">
+                                    <input type="range" id="reprocessWmDenseDensity" min="1" max="10" value="5" step="1">
+                                    <span class="value" id="reprocessWmDenseDensityVal">5</span>
+                                </div>
+                                <p class="param-hint">值越大字体越小、排列越密、越不可见</p>
                             </div>
                         </div>
                     </div>

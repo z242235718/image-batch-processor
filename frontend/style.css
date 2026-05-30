@@ -685,6 +685,84 @@ body {
     font-weight: 600;
 }
 
+/* ─── Color Palette ─── */
+
+.color-palette-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.color-palette {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.color-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+}
+
+.color-swatch.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.color-swatch[data-color="#FFFFFF"] {
+    border: 2px solid #ccc;
+}
+
+/* ─── Color Picker Swatch ─── */
+/* ─── 取色器按钮（自定义颜色） ─── */
+.color-picker-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    /* 默认：彩虹渐变色环 */
+    background: conic-gradient(from 0deg,
+        #ff0000, #ff8800, #ffff00, #00ff00, #0088ff, #8800ff, #ff0088, #ff0000
+    );
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+}
+
+.color-picker-btn:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 2px var(--primary-light), 0 0 0 1px var(--primary);
+}
+
+/* 选中自定义颜色时：显示该颜色 + 放大高亮 */
+.color-picker-btn.active {
+    transform: scale(1.15);
+    border: 2px solid var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* 隐藏原生 input，但可点击 */
+.color-picker-btn input[type="color"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+}
+
 /* ─── Action Buttons ─── */
 .action-buttons {
     display: flex;

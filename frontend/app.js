@@ -108,6 +108,73 @@ document.getElementById('enableBlindWatermark').addEventListener('change', e => 
     document.getElementById('featureBlindWatermark').classList.toggle('feature-item--active', e.target.checked);
 });
 
+// ─── 水印模式联动 ───
+
+document.getElementById('wmMode').addEventListener('change', updateWmModeUI);
+updateWmModeUI();
+
+function updateWmModeUI() {
+    const mode = document.getElementById('wmMode').value;
+    document.getElementById('wmPositionRow').classList.toggle('hidden', mode !== 'position');
+    document.getElementById('wmDirectionRow').classList.toggle('hidden', mode === 'position');
+    document.getElementById('wmDenseRow').classList.toggle('hidden', mode !== 'dense');
+    document.getElementById('wmFontRow').classList.toggle('hidden', mode === 'dense');
+}
+
+document.getElementById('reprocessWmMode').addEventListener('change', updateReprocessWmModeUI);
+
+function updateReprocessWmModeUI() {
+    const mode = document.getElementById('reprocessWmMode').value;
+    const dirRow = document.getElementById('reprocessWmDirectionRow');
+    const denseRow = document.getElementById('reprocessWmDenseRow');
+    if (dirRow) dirRow.classList.toggle('hidden', mode === 'position');
+    if (denseRow) denseRow.classList.toggle('hidden', mode !== 'dense');
+}
+
+// ─── 调色板 ───
+
+function _updatePickerBtn(selectId, color) {
+    const upper = color.toUpperCase();
+    const isPreset = upper === '#CCCCCC' || upper === '#666666' || upper === '#FFFFFF' || upper === '#000000';
+    const pickerBtn = document.getElementById(selectId + 'PickerBtn');
+    if (!pickerBtn) return;
+    if (isPreset) {
+        // 选中的是预设色块 → 恢复彩虹渐变
+        pickerBtn.classList.remove('active');
+        pickerBtn.style.background = '';
+    } else {
+        // 自定义颜色 → 显示该颜色
+        pickerBtn.classList.add('active');
+        pickerBtn.style.background = color;
+    }
+    // 同步原生取色器 value（用于下次打开时定位到该颜色）
+    const picker = document.getElementById(selectId + 'Picker');
+    if (picker) picker.value = color;
+}
+
+function selectPaletteColor(el, selectId) {
+    const color = el.dataset.color || el.value;
+    document.getElementById(selectId).value = color;
+    // 更新色块选中态
+    const paletteWrap = document.getElementById(selectId).closest('.color-palette-wrap');
+    if (paletteWrap) {
+        paletteWrap.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('active', s.dataset.color === color));
+    }
+    // 更新取色器按钮
+    _updatePickerBtn(selectId, color);
+}
+
+function syncPaletteFromSelect(selectId) {
+    const val = document.getElementById(selectId).value;
+    // 更新色块选中态
+    const paletteWrap = document.getElementById(selectId).closest('.color-palette-wrap');
+    if (paletteWrap) {
+        paletteWrap.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('active', s.dataset.color === val));
+    }
+    // 更新取色器按钮
+    _updatePickerBtn(selectId, val);
+}
+
 function toggleFeature(name) {
     const sectionMap = { bg: 'bgSection', logo: 'logoSection', compress: 'compressSection', watermark: 'watermarkSection', blind: 'blindSection' };
     const featureMap = { bg: 'featureBgRemoval', logo: 'featureLogo', compress: 'featureCompress', watermark: 'featureWatermark', blind: 'featureBlindWatermark' };
@@ -364,7 +431,11 @@ function collectConfig() {
     form.append('wm_mode', document.getElementById('enableWatermark').checked ? document.getElementById('wmMode').value : 'off');
     form.append('wm_text', document.getElementById('wmText').value);
     form.append('wm_text_color', document.getElementById('wmTextColor').value);
+    form.append('wm_text_ratio', parseInt(document.getElementById('wmTextRatio').value) / 100);
+    form.append('wm_opacity', parseInt(document.getElementById('wmOpacity').value) / 100);
     form.append('wm_position', selectedWmPosition);
+    form.append('wm_tile_direction', document.getElementById('wmTileDirection').value);
+    form.append('wm_dense_density', parseInt(document.getElementById('wmDenseDensity').value));
     form.append('wm_blind_enabled', document.getElementById('enableBlindWatermark').checked);
     form.append('wm_blind_text', document.getElementById('wmBlindText').value);
     form.append('compress_enabled', document.getElementById('enableCompress').checked);
@@ -635,7 +706,16 @@ function openReprocess(runId, imageId, excludeFeatures) {
     document.getElementById('reprocessWmMode').value = document.getElementById('wmMode').value;
     document.getElementById('reprocessWmText').value = document.getElementById('wmText').value || '';
     document.getElementById('reprocessWmTextColor').value = document.getElementById('wmTextColor').value;
+    syncPaletteFromSelect('reprocessWmTextColor');
+    document.getElementById('reprocessWmTextRatio').value = document.getElementById('wmTextRatio').value;
+    document.getElementById('reprocessWmTextRatioVal').textContent = document.getElementById('wmTextRatio').value + '%';
+    document.getElementById('reprocessWmOpacity').value = document.getElementById('wmOpacity').value;
+    document.getElementById('reprocessWmOpacityVal').textContent = document.getElementById('wmOpacity').value + '%';
     document.getElementById('reprocessWmPosition').value = selectedWmPosition;
+    document.getElementById('reprocessWmTileDirection').value = document.getElementById('wmTileDirection').value;
+    document.getElementById('reprocessWmDenseDensity').value = document.getElementById('wmDenseDensity').value;
+    document.getElementById('reprocessWmDenseDensityVal').textContent = document.getElementById('wmDenseDensity').value;
+    updateReprocessWmModeUI();
 
     // 盲水印
     document.getElementById('reprocessBlindEnabled').checked = false;
@@ -710,7 +790,11 @@ async function startReprocess() {
     form.append('wm_mode', wmEnabled ? document.getElementById('reprocessWmMode').value : 'off');
     form.append('wm_text', document.getElementById('reprocessWmText').value || '');
     form.append('wm_text_color', document.getElementById('reprocessWmTextColor').value);
+    form.append('wm_text_ratio', parseInt(document.getElementById('reprocessWmTextRatio').value) / 100);
+    form.append('wm_opacity', parseInt(document.getElementById('reprocessWmOpacity').value) / 100);
     form.append('wm_position', document.getElementById('reprocessWmPosition').value);
+    form.append('wm_tile_direction', document.getElementById('reprocessWmTileDirection').value);
+    form.append('wm_dense_density', parseInt(document.getElementById('reprocessWmDenseDensity').value));
 
     form.append('wm_blind_enabled', blindEnabled);
     form.append('wm_blind_text', document.getElementById('reprocessBlindText').value || '');
