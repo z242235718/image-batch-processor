@@ -2,6 +2,30 @@ import io
 from PIL import Image
 
 
+# PNG 颜色数阶梯（quality → 调色板颜色数；0 表示不量化）
+# 档位拉细让相邻 quality 档位输出大小有明显差异
+_PNG_COLOR_TABLE = [
+    (100, 0),    # ≥ 100：PNG-24/32 严格无损
+    (95,  256),  # 95~99 ：256 色调色板（高保真）
+    (85,  128),  # 85~94 ：128 色
+    (70,  64),   # 70~84 ：64 色
+    (50,  32),   # 50~69 ：32 色
+    (30,  16),   # 30~49 ：16 色
+    (1,   8),    # 1~29  ：8 色（极限压缩）
+]
+
+# max_file_size_kb 在 PNG 路径上的"颜色数兜底"序列
+_PNG_FALLBACK_COLORS = (256, 128, 64, 32, 16, 8)
+
+
+def _png_palette_size(quality: int) -> int:
+    """quality → 调色板颜色数；0 表示不量化。"""
+    for threshold, n in _PNG_COLOR_TABLE:
+        if quality >= threshold:
+            return n
+    return 16
+
+
 def compress_image(
     image: Image.Image,
     output_format: str = "JPEG",
@@ -9,16 +33,20 @@ def compress_image(
     max_file_size_kb: int = 0,
     max_width: int = 0,
 ) -> bytes:
-    """压缩图片并返回字节数据"""
+    """压缩图片并返回字节数据。
+
+    执行顺序：限宽缩放 → 格式转换 → 编码（含 max_file_size_kb 二分）。
+    裁切/蒙版裁切由调用方在 compress_image 之前完成。
+    """
     img = image.copy()
 
-    # 如果需要限制宽度，等比缩放
+    # 1) 限宽等比缩放
     if max_width > 0 and img.width > max_width:
         ratio = max_width / img.width
         new_height = int(img.height * ratio)
         img = img.resize((max_width, new_height), Image.LANCZOS)
 
-    # JPEG 不支持透明通道
+    # 2) JPEG 不支持透明通道
     if output_format.upper() in ("JPEG", "JPG"):
         if img.mode == "RGBA":
             background = Image.new("RGB", img.size, (255, 255, 255))
@@ -27,24 +55,47 @@ def compress_image(
         elif img.mode != "RGB":
             img = img.convert("RGB")
 
-    # 如果设定了目标文件大小，用二分法逼近
+    fmt_upper = output_format.upper()
+
+    # 3) 目标文件大小约束
     if max_file_size_kb > 0:
         target_bytes = max_file_size_kb * 1024
-        low, high = 1, 95
-        best_data = None
 
-        while low <= high:
-            mid = (low + high) // 2
-            data = _encode(img, output_format, mid)
-            if len(data) <= target_bytes:
-                best_data = data
-                low = mid + 1
-            else:
-                high = mid - 1
-
-        if best_data:
-            return best_data
-        return _encode(img, output_format, 1)
+        if fmt_upper == "PNG":
+            # PNG 路径：先按 quality 二分，再按颜色数兜底
+            low, high = 1, 100
+            best_data = None
+            while low <= high:
+                mid = (low + high) // 2
+                data = _encode(img, output_format, mid)
+                if len(data) <= target_bytes:
+                    best_data = data
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            if best_data is not None:
+                return best_data
+            # 仍超限 → 按颜色数兜底
+            for n in _PNG_FALLBACK_COLORS:
+                data = _encode_png_fixed_colors(img, n)
+                if len(data) <= target_bytes:
+                    return data
+            return _encode_png_fixed_colors(img, _PNG_FALLBACK_COLORS[-1])
+        else:
+            # JPEG / WEBP 路径：原二分搜索
+            low, high = 1, 95
+            best_data = None
+            while low <= high:
+                mid = (low + high) // 2
+                data = _encode(img, output_format, mid)
+                if len(data) <= target_bytes:
+                    best_data = data
+                    low = mid + 1
+                else:
+                    high = mid - 1
+            if best_data:
+                return best_data
+            return _encode(img, output_format, 1)
 
     return _encode(img, output_format, quality)
 
@@ -60,7 +111,55 @@ def _encode(img: Image.Image, fmt: str, quality: int) -> bytes:
         save_kwargs["quality"] = quality
         img.save(buf, format="WEBP", **save_kwargs)
     elif fmt.upper() == "PNG":
-        save_kwargs["compress_level"] = max(0, min(9, (100 - quality) // 11))
-        img.save(buf, format="PNG", **save_kwargs)
+        _save_png(buf, img, quality, **save_kwargs)
 
+    return buf.getvalue()
+
+
+def _save_png(buf: io.BytesIO, img: Image.Image, quality: int, **save_kwargs) -> None:
+    """按 quality 走颜色量化阶梯（PNG 路径）。"""
+    n_colors = _png_palette_size(quality)
+    save_kwargs["compress_level"] = max(0, min(9, (100 - quality) // 11))
+
+    if n_colors <= 0:
+        # 无损路径
+        img.save(buf, format="PNG", **save_kwargs)
+        return
+
+    # 量化路径：保留 alpha 通道
+    src = img
+    try:
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            # method=2 (libimagequant) + dither=NONE 自动保留 alpha
+            src = img.quantize(colors=n_colors, method=2, dither=Image.Dither.NONE)
+        else:
+            src = img.convert("RGB").quantize(colors=n_colors, method=2, dither=Image.Dither.NONE)
+    except Exception:
+        # 回退到 ADAPTIVE 方法（兼容老 Pillow）
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            src = img.quantize(colors=n_colors, method=Image.Palette.ADAPTIVE, dither=Image.Dither.NONE)
+        else:
+            src = img.convert("RGB").quantize(colors=n_colors, method=Image.Palette.ADAPTIVE, dither=Image.Dither.NONE)
+
+    src.save(buf, format="PNG", **save_kwargs)
+
+
+def _encode_png_fixed_colors(img: Image.Image, n_colors: int) -> bytes:
+    """固定颜色数编码（用于 max_file_size_kb 兜底路径）。"""
+    buf = io.BytesIO()
+    save_kwargs = {"optimize": True, "compress_level": 9}
+    if n_colors <= 0:
+        img.save(buf, format="PNG", **save_kwargs)
+        return buf.getvalue()
+    try:
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            src = img.quantize(colors=n_colors, method=2, dither=Image.Dither.NONE)
+        else:
+            src = img.convert("RGB").quantize(colors=n_colors, method=2, dither=Image.Dither.NONE)
+    except Exception:
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            src = img.quantize(colors=n_colors, method=Image.Palette.ADAPTIVE, dither=Image.Dither.NONE)
+        else:
+            src = img.convert("RGB").quantize(colors=n_colors, method=Image.Palette.ADAPTIVE, dither=Image.Dither.NONE)
+    src.save(buf, format="PNG", **save_kwargs)
     return buf.getvalue()

@@ -1044,6 +1044,57 @@ body {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ─── Pagination ─── */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 20px 0 8px;
+    flex-wrap: wrap;
+}
+.pagination.hidden {
+    display: none;
+}
+.page-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+    min-width: 36px;
+    text-align: center;
+}
+.page-btn:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-light);
+}
+.page-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    font-weight: 600;
+}
+.page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.page-ellipsis {
+    padding: 0 4px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+.page-info {
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 /* ─── Image Grid (Upload) ─── */
 .image-grid {
     display: grid;
@@ -1154,6 +1205,28 @@ body {
 
 .settings-modal .modal-body {
     padding: 20px 24px;
+}
+
+/* ─── Download Progress Modal ─── */
+.download-progress-modal {
+    width: 90vw;
+    max-width: 440px;
+}
+.download-progress-bar-wrap {
+    padding: 0 0 16px;
+}
+.download-progress-fill {
+    transition: width 0.3s ease;
+}
+.download-progress-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.download-progress-detail {
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
 .settings-group h4 {
@@ -1447,6 +1520,47 @@ body {
     padding: 5px 14px;
     border-radius: 20px;
     backdrop-filter: blur(4px);
+}
+
+/* ─── Crop Ratio Buttons ─── */
+.ratio-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.ratio-btn {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    min-width: 36px;
+    text-align: center;
+}
+
+.ratio-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.ratio-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+/* ─── Editor Canvas cursor ─── */
+.editor-canvas-wrap.canvas-crop-move canvas {
+    cursor: move;
+}
+
+.editor-canvas-wrap.canvas-crop-resize canvas {
+    cursor: nwse-resize;
 }
 
 /* ─── Responsive ─── */

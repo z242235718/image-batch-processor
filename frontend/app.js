@@ -4,6 +4,11 @@ let currentBatchId = null;
 let ws = null;
 let currentFeatures = [];
 
+// ─── Pagination ───
+let resultPage = 1;
+let resultPerPage = 20;
+let resultTotalPages = 0;
+
 // ─── Upload ───
 
 const uploadZone = document.getElementById('uploadZone');
@@ -72,6 +77,8 @@ function renderImages() {
     });
     document.getElementById('imageCount').textContent = `${uploadedImages.length} 张图片`;
     document.getElementById('processBtn').disabled = uploadedImages.length === 0;
+    const maskBtn = document.getElementById('openMaskCropBtn');
+    if (maskBtn) maskBtn.disabled = uploadedImages.length === 0;
 }
 
 async function deleteImage(id) {
@@ -436,10 +443,17 @@ function collectConfig() {
     form.append('wm_position', selectedWmPosition);
     form.append('wm_tile_direction', document.getElementById('wmTileDirection').value);
     form.append('wm_dense_density', parseInt(document.getElementById('wmDenseDensity').value));
+    // [DISABLED: 盲水印暂屏蔽] 强制不上传盲水印相关参数
+    form.append('wm_blind_enabled', false);
+    form.append('wm_blind_text', '');
+    form.append('wm_blind_strength', 16);
+    form.append('wm_blind_use_mask', false);
+    /* 原代码（已禁用）
     form.append('wm_blind_enabled', document.getElementById('enableBlindWatermark').checked);
     form.append('wm_blind_text', document.getElementById('wmBlindText').value);
     form.append('wm_blind_strength', parseInt(document.getElementById('wmBlindStrength').value) || 16);
     form.append('wm_blind_use_mask', document.getElementById('wmBlindUseMask').checked);
+    */
     form.append('compress_enabled', document.getElementById('enableCompress').checked);
     if (document.getElementById('enableCompress').checked) {
         form.append('output_format', document.getElementById('outputFormat').value);
@@ -450,6 +464,7 @@ function collectConfig() {
         form.append('output_format', 'PNG');
         form.append('quality', '95');
     }
+    // 蒙版由 openMaskCropFrom* 入口直接附加 mask 文件，无需在 collectConfig 中处理
     return form;
 }
 
@@ -458,7 +473,7 @@ function collectFeatures() {
     if (document.getElementById('enableBgRemoval').checked) features.push('bg');
     if (document.getElementById('enableLogo').checked) features.push('logo');
     if (document.getElementById('enableWatermark').checked) features.push('watermark');
-    if (document.getElementById('enableBlindWatermark').checked) features.push('blind');
+    // if (document.getElementById('enableBlindWatermark').checked) features.push('blind');  // [DISABLED: 盲水印暂屏蔽]
     if (document.getElementById('enableCompress').checked) features.push('compress');
     return features;
 }
@@ -467,15 +482,52 @@ function collectFeatures() {
 
 async function startProcess() {
     const btn = document.getElementById('processBtn');
+    if (uploadedImages.length === 0) {
+        alert('请先上传图片');
+        return;
+    }
     btn.disabled = true;
     btn.textContent = '处理中...';
     currentFeatures = collectFeatures();
 
     try {
-        const res = await fetch(`${API}/api/process`, { method: 'POST', body: collectConfig() });
+        const form = collectConfig();
+        // 告诉后端只处理当前上传的图片，避免处理已删除的旧图片
+        form.append('image_ids', uploadedImages.map(i => i.id).join(','));
+        const res = await fetch(`${API}/api/process`, { method: 'POST', body: form });
         const data = await res.json();
+
+        if (!res.ok) {
+            // 后端拒绝（如重启后旧图片 ID 失效），清除本地状态让用户重新上传
+            uploadedImages = [];
+            document.getElementById('fileList').innerHTML = '';
+            document.getElementById('imageCount').textContent = '0 张图片';
+            document.getElementById('processBtn').disabled = true;
+            const maskBtn = document.getElementById('openMaskCropBtn');
+            if (maskBtn) maskBtn.disabled = true;
+            alert(data.detail || '图片已失效，请重新上传');
+            btn.disabled = false;
+            btn.textContent = '开始处理';
+            return;
+        }
+
+        // 只保留后端确认有效的图片 ID（重启后部分 ID 可能已失效）
+        if (data.image_ids) {
+            uploadedImages = uploadedImages.filter(i => data.image_ids.includes(i.id));
+            renderImages();
+        }
+
         currentBatchId = data.batch_id;
         document.getElementById('progressPanel').classList.remove('hidden');
+        // 重置进度显示，避免旧批次数据残留
+        document.getElementById('progressText').textContent = '准备中...';
+        document.getElementById('progressPercent').textContent = '0%';
+        document.getElementById('progressFill').style.width = '0%';
+        document.getElementById('progressFill').classList.remove('done');
+        // 清除旧结果卡片，避免累积
+        document.getElementById('resultGrid').innerHTML = '';
+        document.getElementById('resultPagination').innerHTML = '';
+        document.getElementById('resultPagination').classList.add('hidden');
         initResultCards(data.batch_id);
         connectWebSocket(data.batch_id);
     } catch (err) {
@@ -502,12 +554,19 @@ function initResultCards(batchId) {
         `;
         grid.appendChild(card);
     });
+    resultPage = 1;
+    applyPagination();
 }
 
 // ─── WebSocket ───
 
 function connectWebSocket(batchId) {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // 关闭旧 WebSocket，避免旧批次消息干扰新批次
+    if (ws && ws.readyState === WebSocket.OPEN || ws && ws.readyState === WebSocket.CONNECTING) {
+        ws.onclose = null; // 去掉 onclose 回调，避免触发旧批次的 pollProgress
+        ws.close();
+    }
     ws = new WebSocket(`${protocol}//${location.host}/api/ws/progress/${batchId}`);
 
     ws.onmessage = event => {
@@ -531,6 +590,8 @@ async function pollProgress(batchId) {
 }
 
 function updateProgress(data) {
+    // 已完成数 = 总完成数 - 失败数（后端 done 包含 error 状态）
+    const successCount = Math.max(0, data.done - data.failed);
     const pct = data.total > 0 ? Math.round((data.done / data.total) * 100) : 0;
     const fill = document.getElementById('progressFill');
     fill.style.width = pct + '%';
@@ -538,7 +599,7 @@ function updateProgress(data) {
     if (pct >= 100) fill.classList.add('done');
 
     document.getElementById('progressText').textContent =
-        `已完成 ${data.done}/${data.total}` + (data.failed > 0 ? `，失败 ${data.failed}` : '');
+        `已完成 ${successCount}/${data.total}` + (data.failed > 0 ? `，失败 ${data.failed}` : '');
 
     // 处理单条结果更新（WebSocket 广播）
     if (data.result) updateResultCard(data.result, pct);
@@ -549,8 +610,14 @@ function updateProgress(data) {
     if (data.status === 'done') {
         document.getElementById('processBtn').disabled = false;
         document.getElementById('processBtn').textContent = '开始处理';
-        document.getElementById('downloadAllBtn').classList.remove('hidden');
         document.getElementById('progressSection').classList.remove('hidden');
+        // 完成后自动清空已上传图片，下一批从头开始（不累加）
+        const _doneBatchId = data.batch_id;
+        setTimeout(() => {
+            if (currentBatchId !== _doneBatchId) return; // 用户已开始新一批，跳过
+            uploadedImages = [];
+            renderImages();
+        }, 500);
     } else {
         document.getElementById('progressSection').classList.remove('hidden');
     }
@@ -592,10 +659,11 @@ function updateResultCard(result, itemPct) {
                 <button class="btn btn-outline btn-sm" onclick="showPreview('${result.id}', '${API}${result.output_url}', '${result.filename}')">预览</button>
                 <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">修改</button>
                 <button class="btn btn-outline btn-sm" onclick="openReprocess('${result.run_id}', '${result.id}', '${featuresStr}')">继续处理</button>
-                <button class="btn btn-outline btn-sm" onclick="extractWatermarkFromResult('${result.run_id}', '${result.id}')">提取水印</button>
+                <!-- [HIDDEN: 盲水印提取功能暂屏蔽] <button class="btn btn-outline btn-sm" onclick="extractWatermarkFromResult('${result.run_id}', '${result.id}')">提取水印</button> -->
                 <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
             </div>
         `;
+        applyPagination();
     } else if (result.status === 'error') {
         card.classList.add('error');
         card.innerHTML = `
@@ -615,7 +683,17 @@ function updateResultCard(result, itemPct) {
 }
 
 function cancelProcess() {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send('cancel');
+    const btn = document.querySelector('#progressSection .btn-danger');
+    if (btn) { btn.disabled = true; btn.textContent = '取消中...'; }
+    document.getElementById('progressText').textContent = '正在取消...';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('cancel');
+    } else {
+        // WebSocket 未连接时直接重置
+        document.getElementById('processBtn').disabled = false;
+        document.getElementById('processBtn').textContent = '开始处理';
+        document.getElementById('progressSection').classList.add('hidden');
+    }
 }
 
 function downloadAll() {
@@ -624,9 +702,7 @@ function downloadAll() {
         const link = card.querySelector('.actions a[download]');
         if (!link) return;
         const href = link.getAttribute('href');
-        // API 前缀处理: 如果有 API 前缀则去掉
         const path = href.replace(API, '');
-        // 解析 /api/download/{run_id}/{image_id}
         const match = path.match(/\/api\/download\/([^/]+)\/([^/]+)/);
         if (match) {
             items.push({ run_id: match[1], image_id: match[2] });
@@ -636,16 +712,39 @@ function downloadAll() {
         alert('没有可下载的处理结果');
         return;
     }
-    fetch(`${API}/api/download-all`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
-    })
-    .then(res => {
-        if (!res.ok) throw new Error('下载失败');
-        return res.blob();
-    })
-    .then(blob => {
+
+    // Show progress modal
+    const overlay = document.getElementById('downloadProgressOverlay');
+    const fill = document.getElementById('downloadProgressFill');
+    const text = document.getElementById('downloadProgressText');
+    const detail = document.getElementById('downloadProgressDetail');
+    overlay.classList.remove('hidden');
+    fill.style.width = '0%';
+    text.textContent = '正在打包下载...';
+    detail.textContent = `共 ${items.length} 个文件，准备中...`;
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}/api/download-all`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.responseType = 'blob';
+
+    xhr.onprogress = e => {
+        if (e.lengthComputable) {
+            const pct = Math.min(100, Math.round((e.loaded / e.total) * 100));
+            fill.style.width = pct + '%';
+            detail.textContent = `下载中 ${(e.loaded / 1024 / 1024).toFixed(1)} MB / ${(e.total / 1024 / 1024).toFixed(1)} MB`;
+        } else {
+            detail.textContent = `正在下载... ${items.length} 个文件打包中`;
+        }
+    };
+
+    xhr.onload = () => {
+        overlay.classList.add('hidden');
+        if (xhr.status !== 200) {
+            alert('下载失败: ' + (xhr.statusText || '未知错误'));
+            return;
+        }
+        const blob = xhr.response;
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -654,8 +753,14 @@ function downloadAll() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    })
-    .catch(err => alert(err.message));
+    };
+
+    xhr.onerror = () => {
+        overlay.classList.add('hidden');
+        alert('下载失败: 网络错误');
+    };
+
+    xhr.send(JSON.stringify({ items }));
 }
 
 // ─── 继续处理 ───
@@ -672,9 +777,9 @@ function openReprocess(runId, imageId, excludeFeatures) {
     document.getElementById('reprocessPreview').innerHTML =
         `<img src="${API}/api/result-thumbnail/${runId}/${imageId}?t=${Date.now()}">`;
 
-    // 显示所有分区，排除已处理的功能
-    const sections = ['reprocessBg', 'reprocessLogo', 'reprocessWm', 'reprocessBlind', 'reprocessCompress'];
-    const featureKeys = ['bg', 'logo', 'watermark', 'blind', 'compress'];
+    // 显示所有分区，排除已处理的功能（盲水印 [DISABLED] 已从列表中移除）
+    const sections = ['reprocessBg', 'reprocessLogo', 'reprocessWm', 'reprocessCompress'];
+    const featureKeys = ['bg', 'logo', 'watermark', 'compress'];
     sections.forEach((id, i) => {
         const el = document.getElementById(id);
         if (el) {
@@ -753,21 +858,52 @@ function collectReprocessFeatures() {
     if (document.getElementById('reprocessBgEnabled').checked) features.push('bg');
     if (document.getElementById('reprocessLogoEnabled').checked) features.push('logo');
     if (document.getElementById('reprocessWmEnabled').checked) features.push('watermark');
-    if (document.getElementById('reprocessBlindEnabled').checked) features.push('blind');
+    // if (document.getElementById('reprocessBlindEnabled').checked) features.push('blind');  // [DISABLED: 盲水印暂屏蔽]
     if (document.getElementById('reprocessCompressEnabled').checked) features.push('compress');
     return features;
 }
 
 async function startReprocess() {
+    const form = buildReprocessForm();
+    if (!form) return;  // 已 alert 过
+
+    const btn = document.querySelector('#reprocessOverlay .modal-footer .btn-primary');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '处理中...';
+
+    try {
+        const res = await fetch(`${API}/api/reprocess`, { method: 'POST', body: form });
+        const data = await res.json();
+        if (data.ok) {
+            appendReprocessCard(data);
+            closeReprocess();
+        } else {
+            alert('处理失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (e) {
+        alert('网络错误: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
+/**
+ * 构造「继续处理」表单（startReprocess 与 mask-crop-reprocess 入口复用）
+ * @param {Blob|null} maskBlob - 用户在编辑器中手绘的蒙版 PNG；为 null 则不带 mask 字段
+ * @returns {FormData|null} 当未选任何操作时 alert 并返回 null
+ */
+function buildReprocessForm(maskBlob) {
     const bgEnabled = document.getElementById('reprocessBgEnabled').checked;
     const logoEnabled = document.getElementById('reprocessLogoEnabled').checked;
     const wmEnabled = document.getElementById('reprocessWmEnabled').checked;
     const blindEnabled = document.getElementById('reprocessBlindEnabled').checked;
     const compressEnabled = document.getElementById('reprocessCompressEnabled').checked;
 
-    if (!bgEnabled && !logoEnabled && !wmEnabled && !blindEnabled && !compressEnabled) {
+    if (!bgEnabled && !logoEnabled && !wmEnabled && !blindEnabled && !compressEnabled && !maskBlob) {
         alert('请至少选择一个处理操作');
-        return;
+        return null;
     }
 
     const form = new FormData();
@@ -799,10 +935,17 @@ async function startReprocess() {
     form.append('wm_tile_direction', document.getElementById('reprocessWmTileDirection').value);
     form.append('wm_dense_density', parseInt(document.getElementById('reprocessWmDenseDensity').value));
 
+    // [DISABLED: 盲水印暂屏蔽] 强制不上传盲水印相关参数
+    form.append('wm_blind_enabled', false);
+    form.append('wm_blind_text', '');
+    form.append('wm_blind_strength', 16);
+    form.append('wm_blind_use_mask', false);
+    /* 原代码（已禁用）
     form.append('wm_blind_enabled', blindEnabled);
     form.append('wm_blind_text', document.getElementById('reprocessBlindText').value || '');
     form.append('wm_blind_strength', parseInt(document.getElementById('wmBlindStrength').value) || 16);
     form.append('wm_blind_use_mask', document.getElementById('wmBlindUseMask').checked);
+    */
 
     form.append('compress_enabled', compressEnabled);
     if (compressEnabled) {
@@ -815,26 +958,11 @@ async function startReprocess() {
         form.append('quality', '95');
     }
 
-    const btn = document.querySelector('#reprocessOverlay .modal-footer .btn-primary');
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '处理中...';
-
-    try {
-        const res = await fetch(`${API}/api/reprocess`, { method: 'POST', body: form });
-        const data = await res.json();
-        if (data.ok) {
-            appendReprocessCard(data);
-            closeReprocess();
-        } else {
-            alert('处理失败');
-        }
-    } catch (err) {
-        alert('处理失败: ' + err.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = origText;
+    if (maskBlob) {
+        form.append('mask', maskBlob, 'mask.png');
     }
+
+    return form;
 }
 
 function appendReprocessCard(data) {
@@ -871,6 +999,8 @@ function appendReprocessCard(data) {
         </div>
     `;
     grid.appendChild(card);
+    resultPage = Math.ceil((grid.querySelectorAll('.result-card').length) / resultPerPage);
+    applyPagination();
 }
 
 function clearAll() {
@@ -880,7 +1010,13 @@ function clearAll() {
     document.getElementById('downloadAllBtn').classList.add('hidden');
     document.getElementById('progressFill').style.width = '0%';
     document.getElementById('progressFill').classList.remove('done');
+    document.getElementById('progressPercent').textContent = '0%';
+    document.getElementById('progressText').textContent = '准备中...';
     document.getElementById('resultGrid').innerHTML = '';
+    document.getElementById('resultPagination').innerHTML = '';
+    document.getElementById('resultPagination').classList.add('hidden');
+    resultPage = 1;
+    resultTotalPages = 0;
     if (ws) ws.close();
     currentBatchId = null;
 }
@@ -890,6 +1026,7 @@ async function deleteResult(cardId) {
     const card = document.getElementById(cardId);
     if (!card) return;
     card.remove();
+    applyPagination();
     // 优先使用 data 属性（reprocess/编辑卡片），否则解析卡片 ID
     let imageId = card.dataset.imageId || '';
     let runId = card.dataset.runId || '';
@@ -918,48 +1055,137 @@ async function deleteResult(cardId) {
 }
 
 // ═══════════════════════════════════════
-// ─── Mask Editor ───
+// ─── Pagination ───
+// ═══════════════════════════════════════
+
+function applyPagination() {
+    const grid = document.getElementById('resultGrid');
+    const cards = grid.querySelectorAll('.result-card');
+    const total = cards.length;
+    resultTotalPages = Math.max(1, Math.ceil(total / resultPerPage));
+    if (resultPage > resultTotalPages) resultPage = resultTotalPages;
+    if (resultPage < 1) resultPage = 1;
+
+    const start = (resultPage - 1) * resultPerPage;
+    const end = Math.min(start + resultPerPage, total);
+
+    cards.forEach((card, i) => {
+        card.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+
+    renderPaginationControls();
+
+    // Show download button if there are any completed result cards
+    const hasResults = Array.from(cards).some(c =>
+        c.querySelector('.actions a[download]')
+    );
+    const btn = document.getElementById('downloadAllBtn');
+    if (btn) btn.classList.toggle('hidden', !hasResults);
+}
+
+function renderPaginationControls() {
+    const container = document.getElementById('resultPagination');
+    if (!container) return;
+
+    if (resultTotalPages <= 1) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+
+    let html = '';
+    // Prev button
+    const prevDisabled = resultPage <= 1;
+    html += `<button class="page-btn" onclick="goResultPage(${resultPage - 1})"${prevDisabled ? ' disabled' : ''}>‹ 上一页</button>`;
+
+    // Page numbers - show window of pages around current
+    const maxVisible = 7;
+    let pageStart = Math.max(1, resultPage - Math.floor(maxVisible / 2));
+    let pageEnd = Math.min(resultTotalPages, pageStart + maxVisible - 1);
+    if (pageEnd - pageStart < maxVisible - 1) {
+        pageStart = Math.max(1, pageEnd - maxVisible + 1);
+    }
+
+    if (pageStart > 1) {
+        html += `<button class="page-btn" onclick="goResultPage(1)">1</button>`;
+        if (pageStart > 2) html += `<span class="page-ellipsis">…</span>`;
+    }
+    for (let i = pageStart; i <= pageEnd; i++) {
+        html += `<button class="page-btn${i === resultPage ? ' active' : ''}" onclick="goResultPage(${i})">${i}</button>`;
+    }
+    if (pageEnd < resultTotalPages) {
+        if (pageEnd < resultTotalPages - 1) html += `<span class="page-ellipsis">…</span>`;
+        html += `<button class="page-btn" onclick="goResultPage(${resultTotalPages})">${resultTotalPages}</button>`;
+    }
+
+    // Next button
+    const nextDisabled = resultPage >= resultTotalPages;
+    html += `<button class="page-btn" onclick="goResultPage(${resultPage + 1})"${nextDisabled ? ' disabled' : ''}>下一页 ›</button>`;
+
+    // Page info
+    html += `<span class="page-info">第 ${resultPage}/${resultTotalPages} 页，共 ${document.querySelectorAll('#resultGrid .result-card').length} 项</span>`;
+
+    container.innerHTML = html;
+}
+
+function goResultPage(page) {
+    if (page < 1 || page > resultTotalPages) return;
+    resultPage = page;
+    applyPagination();
+    // Scroll result panel into view
+    document.getElementById('progressPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ═══════════════════════════════════════
+// ─── Crop Box Editor ───
 // ═══════════════════════════════════════
 
 let editorImageId = null;
 let editorCanvas = null;
 let editorCtx = null;
-let editorTool = 'erase';
-let editorBrushSize = 20;
-let isDrawing = false;
-let editorHistory = [];
-let editorCutoutImg = null;   // 已抠图的底图（含透明通道）
-let editorMaskData = null;    // 全尺寸蒙版 (白=保留, 黑=擦除)
+let editorCutoutImg = null;
 let editorScale = 1;
-let editorZoom = 1;           // 缩放倍数
-let editorReady = false;      // 编辑器是否就绪
+let editorZoom = 1;
+let editorReady = false;
+let editorMode = 'modify';    // 'modify' | 'mask-crop-main' | 'mask-crop-reprocess'
+let editorSourceRunId = null;
+
+// Crop box state
+let editorCropBox = null;        // { x, y, w, h } in image pixel coords
+let editorAspectRatio = null;    // null = free, number = locked W/H ratio
+let editorDragType = null;       // null | 'move' | handle key ('nw','ne','sw','se','n','s','w','e')
+let editorDragStart = null;      // { mx, my, origBox } at drag begin
+let editorCanvasOffset = { ox: 0, oy: 0 };  // image → canvas offset for crop-box-beyond-image
+
+// ─── Open / Init ───
 
 function openEditor(imageId) {
     editorImageId = imageId;
     editorReady = false;
-    editorHistory = [];
-    editorTool = 'erase';
-    editorBrushSize = 20;
     editorZoom = 1;
+    editorMode = 'modify';
+    editorSourceRunId = null;
+    editorCropBox = null;
+    editorAspectRatio = null;
+    editorDragType = null;
+    editorDragStart = null;
 
-    // 重置工具栏 UI
-    document.getElementById('brushSize').value = 20;
-    document.getElementById('brushSizeVal').textContent = '20';
+    // Reset ratio UI
+    document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.ratio-btn[data-ratio="free"]')?.classList.add('active');
     document.getElementById('editorZoomVal').textContent = '100%';
-    document.getElementById('toolErase').classList.add('active');
-    document.getElementById('toolKeep').classList.remove('active');
 
-    // 显示弹窗
+    // Show modal
     document.getElementById('editorOverlay').classList.remove('hidden');
 
-    // 加载抠图结果 PNG（含透明通道）
+    // Load cutout PNG first (has alpha), fallback to original
     const img = new Image();
     img.onload = () => {
         editorCutoutImg = img;
         initEditorCanvas();
     };
     img.onerror = () => {
-        // 抠图结果不存在，回退到加载原图
         const fallback = new Image();
         fallback.onload = () => {
             editorCutoutImg = fallback;
@@ -980,7 +1206,7 @@ function initEditorCanvas() {
     canvas.width = img.width;
     canvas.height = img.height;
 
-    // CSS 缩放到可视区域
+    // CSS scale to fit viewport
     const wrap = document.querySelector('.editor-canvas-wrap');
     const maxW = wrap.clientWidth - 32;
     const maxH = window.innerHeight - 220;
@@ -989,71 +1215,135 @@ function initEditorCanvas() {
     canvas.style.width = Math.round(img.width * editorScale) + 'px';
     canvas.style.height = Math.round(img.height * editorScale) + 'px';
 
-    // 先把抠图画到临时 canvas 上，取 alpha 通道生成初始蒙版
-    const tmpC = document.createElement('canvas');
-    tmpC.width = img.width; tmpC.height = img.height;
-    const tmpCtx = tmpC.getContext('2d');
-    tmpCtx.drawImage(img, 0, 0);
-    const cutoutPixels = tmpCtx.getImageData(0, 0, img.width, img.height);
+    // Default crop box: centered, ~80 % of image, free ratio
+    const margin = 0.1;
+    editorCropBox = {
+        x: Math.round(img.width * margin),
+        y: Math.round(img.height * margin),
+        w: Math.round(img.width * (1 - 2 * margin)),
+        h: Math.round(img.height * (1 - 2 * margin)),
+    };
 
-    // 蒙版：alpha > 128 → 白(保留)，否则 → 黑(擦除)
-    const mask = new ImageData(img.width, img.height);
-    const cd = cutoutPixels.data, md = mask.data;
-    for (let i = 0; i < cd.length; i += 4) {
-        const val = cd[i + 3] > 128 ? 255 : 0;
-        md[i] = val; md[i + 1] = val; md[i + 2] = val; md[i + 3] = 255;
-    }
-    editorMaskData = mask;
-
-    showMaskView();
-    saveEditorState();
+    showCropView();
     editorReady = true;
 }
 
-function showMaskView() {
-    if (!editorCutoutImg || !editorMaskData || !editorCtx) return;
-    const w = editorCanvas.width, h = editorCanvas.height;
-    const cs = 12;
+// ─── Crop View Rendering ───
 
-    // 棋盘格背景
+/** Draw a checkerboard pattern over the given rect (cell size = cs). */
+function drawCheckerboard(ctx, x, y, w, h, cs) {
+    cs = cs || 10;
+    for (let iy = 0; iy < h; iy += cs) {
+        for (let ix = 0; ix < w; ix += cs) {
+            const light = ((ix / cs + iy / cs) % 2 === 0);
+            ctx.fillStyle = light ? '#d0d0d0' : '#ffffff';
+            ctx.fillRect(x + ix, y + iy, Math.min(cs, w - ix), Math.min(cs, h - iy));
+        }
+    }
+}
+
+function showCropView() {
+    if (!editorCutoutImg || !editorCropBox || !editorCtx) return;
+
+    const IW = editorCutoutImg.width;
+    const IH = editorCutoutImg.height;
+    const cb = editorCropBox;
+
+    // Calculate viewport bounds: union of image and crop box
+    const viewX = Math.min(0, cb.x);
+    const viewY = Math.min(0, cb.y);
+    const viewW = Math.max(IW, cb.x + cb.w) - viewX;
+    const viewH = Math.max(IH, cb.y + cb.h) - viewY;
+    const ox = -viewX;  // image top-left in expanded canvas coords
+    const oy = -viewY;
+
+    // Store offset for hit testing
+    editorCanvasOffset.ox = ox;
+    editorCanvasOffset.oy = oy;
+
+    // Resize canvas only when dimensions change
+    if (editorCanvas.width !== viewW || editorCanvas.height !== viewH) {
+        editorCanvas.width = viewW;
+        editorCanvas.height = viewH;
+        editorCanvas.style.width = Math.round(viewW * editorScale) + 'px';
+        editorCanvas.style.height = Math.round(viewH * editorScale) + 'px';
+    }
+
+    // 1. Background: checkerboard for padding area, then draw image
+    const needsExpansion = viewX < 0 || viewY < 0 || viewX + viewW > IW || viewY + viewH > IH;
+    if (needsExpansion) {
+        drawCheckerboard(editorCtx, 0, 0, viewW, viewH, 12);
+    } else {
+        editorCtx.fillStyle = '#e2e8f0';
+        editorCtx.fillRect(0, 0, viewW, viewH);
+    }
+    editorCtx.drawImage(editorCutoutImg, ox, oy);
+
+    // 2. Semi-transparent dark overlay around the crop box (4 rects, in canvas coords)
+    const cx = cb.x + ox;  // crop box top-left in canvas coords
+    const cy = cb.y + oy;
+    editorCtx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    // top strip
+    if (cy > 0) editorCtx.fillRect(0, 0, viewW, cy);
+    // bottom strip
+    if (cy + cb.h < viewH) editorCtx.fillRect(0, cy + cb.h, viewW, viewH - cy - cb.h);
+    // left strip
+    if (cx > 0) editorCtx.fillRect(0, cy, cx, cb.h);
+    // right strip
+    if (cx + cb.w < viewW) editorCtx.fillRect(cx + cb.w, cy, viewW - cx - cb.w, cb.h);
+
+    // 3. Crop box border
+    editorCtx.strokeStyle = '#fff';
+    editorCtx.lineWidth = 2;
+    editorCtx.setLineDash([]);
+    editorCtx.strokeRect(cx, cy, cb.w, cb.h);
+
+    // 4. Corner handles (≈10 screen px)
+    const s = editorScale || 1;
+    const hs = Math.max(8, 10 / s);
+    const corners = [
+        { x: cx, y: cy },                         // nw
+        { x: cx + cb.w, y: cy },                  // ne
+        { x: cx, y: cy + cb.h },                  // sw
+        { x: cx + cb.w, y: cy + cb.h },           // se
+    ];
     editorCtx.fillStyle = '#fff';
-    editorCtx.fillRect(0, 0, w, h);
-    editorCtx.fillStyle = '#ddd';
-    for (let y = 0; y < h; y += cs) {
-        for (let x = 0; x < w; x += cs) {
-            if (((x / cs | 0) + (y / cs | 0)) % 2 === 0) editorCtx.fillRect(x, y, cs, cs);
-        }
+    editorCtx.strokeStyle = '#444';
+    editorCtx.lineWidth = 1.5;
+    for (const c of corners) {
+        editorCtx.fillRect(c.x - hs / 2, c.y - hs / 2, hs, hs);
+        editorCtx.strokeRect(c.x - hs / 2, c.y - hs / 2, hs, hs);
     }
 
-    // 抠图底图
-    editorCtx.drawImage(editorCutoutImg, 0, 0);
-
-    // 擦除区域叠加红色
-    const imgData = editorCtx.getImageData(0, 0, w, h);
-    const m = editorMaskData.data;
-    const p = imgData.data;
-    for (let i = 0; i < m.length; i += 4) {
-        if (m[i] < 128) {
-            p[i]     = (p[i] * 3 + 220) >> 2;
-            p[i + 1] = (p[i + 1] * 3 + 40) >> 2;
-            p[i + 2] = (p[i + 2] * 3 + 40) >> 2;
-        }
+    // 5. Edge midpoint handles (≈6 screen px)
+    const ehs = Math.max(5, 6 / (editorScale || 1));
+    const edges = [
+        { x: cx + cb.w / 2, y: cy },              // n
+        { x: cx + cb.w / 2, y: cy + cb.h },       // s
+        { x: cx, y: cy + cb.h / 2 },              // w
+        { x: cx + cb.w, y: cy + cb.h / 2 },       // e
+    ];
+    for (const e of edges) {
+        editorCtx.fillRect(e.x - ehs / 2, e.y - ehs / 2, ehs, ehs);
+        editorCtx.strokeRect(e.x - ehs / 2, e.y - ehs / 2, ehs, ehs);
     }
-    editorCtx.putImageData(imgData, 0, 0);
+
+    // 6. Rule‑of‑thirds grid (subtle)
+    editorCtx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    editorCtx.lineWidth = 1;
+    editorCtx.setLineDash([4, 4]);
+    const x1 = cx + cb.w / 3, x2 = cx + cb.w * 2 / 3;
+    const y1 = cy + cb.h / 3, y2 = cy + cb.h * 2 / 3;
+    editorCtx.beginPath();
+    editorCtx.moveTo(x1, cy); editorCtx.lineTo(x1, cy + cb.h);
+    editorCtx.moveTo(x2, cy); editorCtx.lineTo(x2, cy + cb.h);
+    editorCtx.moveTo(cx, y1); editorCtx.lineTo(cx + cb.w, y1);
+    editorCtx.moveTo(cx, y2); editorCtx.lineTo(cx + cb.w, y2);
+    editorCtx.stroke();
+    editorCtx.setLineDash([]);
 }
 
-// ─── 工具栏 ───
-
-function setTool(tool) {
-    editorTool = tool;
-    document.getElementById('toolErase').classList.toggle('active', tool === 'erase');
-    document.getElementById('toolKeep').classList.toggle('active', tool === 'keep');
-}
-
-function updateBrushSize(val) {
-    editorBrushSize = parseInt(val);
-    document.getElementById('brushSizeVal').textContent = val;
-}
+// ─── Zoom ───
 
 function applyEditorZoom() {
     if (!editorCanvas || !editorCutoutImg) return;
@@ -1062,8 +1352,8 @@ function applyEditorZoom() {
     const maxH = window.innerHeight - 220;
     const baseScale = Math.min(1, maxW / editorCutoutImg.width, maxH / editorCutoutImg.height);
     editorScale = baseScale * editorZoom;
-    editorCanvas.style.width = Math.round(editorCutoutImg.width * editorScale) + 'px';
-    editorCanvas.style.height = Math.round(editorCutoutImg.height * editorScale) + 'px';
+    editorCanvas.style.width = Math.round(editorCanvas.width * editorScale) + 'px';
+    editorCanvas.style.height = Math.round(editorCanvas.height * editorScale) + 'px';
     document.getElementById('editorZoomVal').textContent = Math.round(editorZoom * 100) + '%';
 }
 
@@ -1077,142 +1367,286 @@ function zoomOutEditor() {
     applyEditorZoom();
 }
 
-function saveEditorState() {
-    if (!editorMaskData) return;
-    editorHistory.push(new ImageData(
-        new Uint8ClampedArray(editorMaskData.data),
-        editorMaskData.width,
-        editorMaskData.height
-    ));
-    if (editorHistory.length > 30) editorHistory.shift();
+// ─── Aspect Ratio ───
+
+function setAspectRatio(ratio) {
+    editorAspectRatio = ratio;
+
+    // Update active button in ratio group
+    document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+    let matched = false;
+    document.querySelectorAll('.ratio-btn').forEach(b => {
+        const v = b.dataset.ratio;
+        const match =
+            (ratio === null && v === 'free') ||
+            (v === '1x1' && ratio !== null && Math.abs(ratio - 1) < 0.001) ||
+            (v === '4x3' && ratio !== null && Math.abs(ratio - 4 / 3) < 0.001) ||
+            (v === '3x4' && ratio !== null && Math.abs(ratio - 3 / 4) < 0.001) ||
+            (v === '16x9' && ratio !== null && Math.abs(ratio - 16 / 9) < 0.001) ||
+            (v === '9x16' && ratio !== null && Math.abs(ratio - 9 / 16) < 0.001) ||
+            (v === '3x2' && ratio !== null && Math.abs(ratio - 3 / 2) < 0.001) ||
+            (v === '2x3' && ratio !== null && Math.abs(ratio - 2 / 3) < 0.001);
+        if (match) { b.classList.add('active'); matched = true; }
+    });
+    if (!matched) {
+        document.querySelector('.ratio-btn[data-ratio="free"]')?.classList.add('active');
+        editorAspectRatio = null;
+        return;
+    }
+
+    if (!editorCropBox || ratio === null) return;
+
+    // Adjust the current crop box to match the new ratio keeping area ≈ same
+    const cb = editorCropBox;
+    const curRatio = cb.w / cb.h;
+    if (Math.abs(curRatio - ratio) < 0.01) return;
+
+    const maxW = editorCutoutImg.width;
+    const maxH = editorCutoutImg.height;
+    let newW, newH;
+
+    if (ratio > curRatio) {
+        // Need wider → keep height, derive width
+        newH = cb.h;
+        newW = Math.min(cb.h * ratio, maxW);
+        // If limited by image width, recalc height
+        if (newW >= maxW) { newW = maxW; newH = newW / ratio; }
+    } else {
+        // Need taller → keep width, derive height
+        newW = cb.w;
+        newH = Math.min(cb.w / ratio, maxH);
+        if (newH >= maxH) { newH = maxH; newW = newH * ratio; }
+    }
+
+    // Shrink/expand evenly from center, clamped to image bounds
+    const dx = Math.round((cb.w - newW) / 2);
+    const dy = Math.round((cb.h - newH) / 2);
+
+    let nx = cb.x + dx;
+    let ny = cb.y + dy;
+    // Clamp position so box stays inside image
+    if (nx < 0) nx = 0;
+    if (ny < 0) ny = 0;
+    if (nx + newW > maxW) nx = maxW - newW;
+    if (ny + newH > maxH) ny = maxH - newH;
+
+    editorCropBox = {
+        x: Math.round(nx),
+        y: Math.round(ny),
+        w: Math.round(Math.min(newW, maxW)),
+        h: Math.round(Math.min(newH, maxH)),
+    };
+    showCropView();
 }
 
-function undoEditor() {
-    if (editorHistory.length <= 1) return;
-    editorHistory.pop();
-    const prev = editorHistory[editorHistory.length - 1];
-    editorMaskData = new ImageData(new Uint8ClampedArray(prev.data), prev.width, prev.height);
-    showMaskView();
+// ─── Interaction helpers ───
+
+function getCanvasPos(e) {
+    const canvas = document.getElementById('editorCanvas');
+    if (!canvas || !editorReady) return null;
+    const rect = canvas.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    return {
+        x: (src.clientX - rect.left) / editorScale - editorCanvasOffset.ox,
+        y: (src.clientY - rect.top) / editorScale - editorCanvasOffset.oy,
+    };
 }
 
-function resetEditor() {
-    if (!editorCutoutImg) return;
-    const w = editorCanvas.width, h = editorCanvas.height;
-    const mask = new ImageData(w, h);
-    const d = mask.data;
-    for (let i = 0; i < d.length; i += 4) { d[i] = 255; d[i + 1] = 255; d[i + 2] = 255; d[i + 3] = 255; }
-    editorMaskData = mask;
-    showMaskView();
-    saveEditorState();
+/** Returns the handle key if (mx,my) is near a handle, or 'move' if inside box, or null. */
+function hitTest(mx, my) {
+    if (!editorCropBox) return null;
+    const cb = editorCropBox;
+    // Adaptive radius ≈12 screen px so handles are clickable even when zoomed out
+    const r = Math.max(8, 12 / (editorScale || 1));
+
+    // Corners first (higher priority)
+    const corners = [
+        { k: 'nw', x: cb.x, y: cb.y },
+        { k: 'ne', x: cb.x + cb.w, y: cb.y },
+        { k: 'sw', x: cb.x, y: cb.y + cb.h },
+        { k: 'se', x: cb.x + cb.w, y: cb.y + cb.h },
+    ];
+    for (const c of corners) {
+        if (Math.abs(mx - c.x) < r && Math.abs(my - c.y) < r) return c.k;
+    }
+    // Edges
+    const edges = [
+        { k: 'n',  x: cb.x + cb.w / 2, y: cb.y },
+        { k: 's',  x: cb.x + cb.w / 2, y: cb.y + cb.h },
+        { k: 'w',  x: cb.x, y: cb.y + cb.h / 2 },
+        { k: 'e',  x: cb.x + cb.w, y: cb.y + cb.h / 2 },
+    ];
+    for (const e of edges) {
+        if (Math.abs(mx - e.x) < r && Math.abs(my - e.y) < r) return e.k;
+    }
+    // Inside box?
+    if (mx >= cb.x && mx <= cb.x + cb.w && my >= cb.y && my <= cb.y + cb.h) return 'move';
+    return null;
 }
 
-// ─── 画笔绘制（事件委托 + 线段插值平滑笔触）───
+/** Constrain (w, h) to match target aspect ratio, keeping area ≈ same. */
+function constrainRatio(w, h, ratio) {
+    const wFromH = h * ratio;
+    const hFromW = w / ratio;
+    if (wFromH <= w) return { w: Math.round(wFromH), h: Math.round(h) };
+    return { w: Math.round(w), h: Math.round(hFromW) };
+}
 
-(function initEditorEvents() {
+// ─── Mouse / Touch Interaction ───
+
+(function initCropEditorEvents() {
     const wrap = document.querySelector('.editor-canvas-wrap');
     if (!wrap) return;
 
-    let lastX = -1, lastY = -1; // 上次绘制的画布坐标
+    function onPointerDown(e) {
+        if (!editorReady || !editorCropBox) return;
+        e.preventDefault();
+        const p = getCanvasPos(e);
+        if (!p) return;
+        const mx = Math.round(p.x), my = Math.round(p.y);
 
-    function getPos(e) {
-        const canvas = document.getElementById('editorCanvas');
-        if (!canvas || !editorReady) return null;
-        const rect = canvas.getBoundingClientRect();
-        const src = e.touches ? e.touches[0] : e;
-        return {
-            x: (src.clientX - rect.left) / editorScale,
-            y: (src.clientY - rect.top) / editorScale,
+        let hit = hitTest(mx, my);
+        if (!hit) hit = 'create';
+
+        editorDragType = hit;
+        editorDragStart = {
+            mx,
+            my,
+            origBox: { ...editorCropBox },
         };
+
+        // Update cursor
+        if (hit === 'move') {
+            wrap.classList.add('canvas-crop-move');
+        } else if (hit !== 'create') {
+            wrap.classList.add('canvas-crop-resize');
+        }
     }
 
-    // 在蒙版 (ox,oy) 处画一个圆
-    function stamp(ox, oy) {
-        const val = editorTool === 'erase' ? 0 : 255;
-        const r = editorBrushSize;
-        const w = editorMaskData.width, h = editorMaskData.height;
-        const m = editorMaskData.data;
-        const r2 = r * r;
-        for (let dy = -r; dy <= r; dy++) {
-            const py = oy + dy;
-            if (py < 0 || py >= h) continue;
-            const dy2 = dy * dy;
-            const row = py * w * 4;
-            for (let dx = -r; dx <= r; dx++) {
-                if (dx * dx + dy2 > r2) continue;
-                const px = ox + dx;
-                if (px < 0 || px >= w) continue;
-                m[row + px * 4] = val;
-                m[row + px * 4 + 1] = val;
-                m[row + px * 4 + 2] = val;
+    function onPointerMove(e) {
+        if (!editorReady || !editorCropBox) return;
+
+        // Update cursor even when not dragging
+        if (!editorDragType) {
+            const p = getCanvasPos(e);
+            if (p) {
+                const hit = hitTest(Math.round(p.x), Math.round(p.y));
+                wrap.classList.toggle('canvas-crop-move', hit === 'move');
+                wrap.classList.toggle('canvas-crop-resize', hit && hit !== 'move');
             }
+            return;
         }
-    }
 
-    // 从 (x0,y0) 到 (x1,y1) 沿线段每隔 r/2 画一个 stamp，形成连续笔触
-    function stroke(x0, y0, x1, y1) {
-        const dx = x1 - x0, dy = y1 - y0;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const step = Math.max(1, editorBrushSize * 0.4);
-        const steps = Math.max(1, Math.ceil(dist / step));
-        for (let i = 0; i <= steps; i++) {
-            const t = i / steps;
-            stamp(Math.round(x0 + dx * t), Math.round(y0 + dy * t));
-        }
-    }
-
-    function onDown(e) {
-        if (!editorReady || !editorMaskData) return;
         e.preventDefault();
-        isDrawing = true;
-        const p = getPos(e);
+        const p = getCanvasPos(e);
         if (!p) return;
-        lastX = Math.round(p.x);
-        lastY = Math.round(p.y);
-        stamp(lastX, lastY);
-        showMaskView();
-    }
+        const mx = Math.round(p.x), my = Math.round(p.y);
+        const start = editorDragStart;
+        const ob = start.origBox;
+        const ratio = editorAspectRatio;
+        const MIN = 20;
+        const IW = editorCutoutImg.width;
+        const IH = editorCutoutImg.height;
+        let newBox;
 
-    function onMove(e) {
-        if (!isDrawing || !editorReady || !editorMaskData) return;
-        e.preventDefault();
-        const p = getPos(e);
-        if (!p) return;
-        const cx = Math.round(p.x), cy = Math.round(p.y);
-        if (lastX >= 0) {
-            stroke(lastX, lastY, cx, cy);
+        // Create a new crop box by dragging on empty area
+        if (editorDragType === 'create') {
+            let nx = Math.min(mx, start.mx);
+            let ny = Math.min(my, start.my);
+            let nw = Math.max(MIN, Math.abs(mx - start.mx));
+            let nh = Math.max(MIN, Math.abs(my - start.my));
+            if (ratio) {
+                if (nw / nh > ratio) {
+                    nw = Math.round(nh * ratio);
+                } else {
+                    nh = Math.round(nw / ratio);
+                }
+            }
+            // Clamp to image bounds
+            if (nx < 0) nx = 0;
+            if (ny < 0) ny = 0;
+            if (nx + nw > IW) nw = IW - nx;
+            if (ny + nh > IH) nh = IH - ny;
+            newBox = { x: Math.round(nx), y: Math.round(ny), w: Math.round(Math.max(MIN, nw)), h: Math.round(Math.max(MIN, nh)) };
+
+        } else if (editorDragType === 'move') {
+            const dx = mx - start.mx;
+            const dy = my - start.my;
+            let nx = ob.x + dx;
+            let ny = ob.y + dy;
+            // Clamp to image bounds
+            nx = Math.max(0, Math.min(nx, IW - ob.w));
+            ny = Math.max(0, Math.min(ny, IH - ob.h));
+            newBox = { x: Math.round(nx), y: Math.round(ny), w: ob.w, h: ob.h };
+        } else if (editorDragType === 'se') {
+            let nw = Math.max(MIN, ob.w + (mx - start.mx));
+            let nh = Math.max(MIN, ob.h + (my - start.my));
+            if (ratio) { const c = constrainRatio(nw, nh, ratio); nw = Math.max(MIN, c.w); nh = Math.max(MIN, c.h); }
+            newBox = { x: ob.x, y: ob.y, w: Math.round(nw), h: Math.round(nh) };
+        } else if (editorDragType === 'ne') {
+            let nw = Math.max(MIN, ob.w + (mx - start.mx));
+            let nh = Math.max(MIN, ob.h - (my - start.my));
+            if (ratio) { const c = constrainRatio(nw, nh, ratio); nw = Math.max(MIN, c.w); nh = Math.max(MIN, c.h); }
+            newBox = { x: ob.x, y: Math.round((ob.y + ob.h) - nh), w: Math.round(nw), h: Math.round(nh) };
+        } else if (editorDragType === 'sw') {
+            let nw = Math.max(MIN, ob.w - (mx - start.mx));
+            let nh = Math.max(MIN, ob.h + (my - start.my));
+            if (ratio) { const c = constrainRatio(nw, nh, ratio); nw = Math.max(MIN, c.w); nh = Math.max(MIN, c.h); }
+            newBox = { x: Math.round((ob.x + ob.w) - nw), y: ob.y, w: Math.round(nw), h: Math.round(nh) };
+        } else if (editorDragType === 'nw') {
+            let nw = Math.max(MIN, ob.w - (mx - start.mx));
+            let nh = Math.max(MIN, ob.h - (my - start.my));
+            if (ratio) { const c = constrainRatio(nw, nh, ratio); nw = Math.max(MIN, c.w); nh = Math.max(MIN, c.h); }
+            newBox = { x: Math.round((ob.x + ob.w) - nw), y: Math.round((ob.y + ob.h) - nh), w: Math.round(nw), h: Math.round(nh) };
+        } else if (editorDragType === 'e') {
+            let nw = Math.max(MIN, ob.w + (mx - start.mx));
+            if (ratio) { const nh = Math.round(nw / ratio); nw = Math.round(nh * ratio); }
+            newBox = { x: ob.x, y: ob.y, w: Math.round(nw), h: ob.h };
+        } else if (editorDragType === 'w') {
+            let nw = Math.max(MIN, ob.w - (mx - start.mx));
+            if (ratio) { const nh = Math.round(nw / ratio); nw = Math.round(nh * ratio); }
+            newBox = { x: Math.round((ob.x + ob.w) - nw), y: ob.y, w: Math.round(nw), h: ob.h };
+        } else if (editorDragType === 's') {
+            let nh = Math.max(MIN, ob.h + (my - start.my));
+            if (ratio) { const nw = Math.round(nh * ratio); nh = Math.round(nw / ratio); }
+            newBox = { x: ob.x, y: ob.y, w: ob.w, h: Math.round(nh) };
+        } else if (editorDragType === 'n') {
+            let nh = Math.max(MIN, ob.h - (my - start.my));
+            if (ratio) { const nw = Math.round(nh * ratio); nh = Math.round(nw / ratio); }
+            newBox = { x: ob.x, y: Math.round((ob.y + ob.h) - nh), w: ob.w, h: Math.round(nh) };
         } else {
-            stamp(cx, cy);
+            return;
         }
-        lastX = cx;
-        lastY = cy;
-        showMaskView();
+
+        // For resize: allow box to extend beyond image bounds → canvas expands with padding.
+        // Move & create clamp within their branches above.
+
+        editorCropBox = newBox;
+        showCropView();
     }
 
-    function onUp() {
-        if (isDrawing) {
-            isDrawing = false;
-            lastX = lastY = -1;
-            saveEditorState();
-        }
+    function onPointerUp() {
+        if (!editorDragType) return;
+        editorDragType = null;
+        editorDragStart = null;
+        wrap.classList.remove('canvas-crop-move', 'canvas-crop-resize');
     }
 
-    wrap.addEventListener('mousedown', onDown);
-    wrap.addEventListener('mousemove', onMove);
-    wrap.addEventListener('mouseup', onUp);
-    wrap.addEventListener('mouseleave', onUp);
-    wrap.addEventListener('touchstart', onDown, { passive: false });
-    wrap.addEventListener('touchmove', onMove, { passive: false });
-    wrap.addEventListener('touchend', onUp);
+    wrap.addEventListener('mousedown', onPointerDown);
+    wrap.addEventListener('mousemove', onPointerMove);
+    wrap.addEventListener('mouseup', onPointerUp);
+    wrap.addEventListener('mouseleave', onPointerUp);
+    wrap.addEventListener('touchstart', onPointerDown, { passive: false });
+    wrap.addEventListener('touchmove', onPointerMove, { passive: false });
+    wrap.addEventListener('touchend', onPointerUp);
 
-    // 鼠标滚轮缩放
-    wrap.addEventListener('wheel', function(e) {
+    // Mouse wheel zoom
+    wrap.addEventListener('wheel', function (e) {
         if (!editorReady) return;
         e.preventDefault();
-        if (e.deltaY < 0) {
-            editorZoom = Math.min(5, editorZoom * 1.1);
-        } else {
-            editorZoom = Math.max(0.2, editorZoom / 1.1);
-        }
+        editorZoom = e.deltaY < 0
+            ? Math.min(5, editorZoom * 1.1)
+            : Math.max(0.2, editorZoom / 1.1);
         applyEditorZoom();
     }, { passive: false });
 })();
@@ -1222,32 +1656,131 @@ function closeEditor() {
     editorReady = false;
     editorImageId = null;
     editorCutoutImg = null;
-    editorMaskData = null;
-    editorHistory = [];
+    editorCropBox = null;
+    editorDragType = null;
+    editorDragStart = null;
+    editorCanvasOffset = { ox: 0, oy: 0 };
     editorZoom = 1;
     if (editorCanvas) {
         editorCanvas.style.width = '';
         editorCanvas.style.height = '';
     }
+    document.querySelector('.editor-canvas-wrap')?.classList.remove('canvas-crop-move', 'canvas-crop-resize');
 }
 
+// ─── Save: produce mask from crop box & submit ───
+
 async function saveMask() {
-    if (!editorImageId || !editorMaskData) return;
+    if (!editorImageId || !editorCropBox) return;
 
-    const tmpC = document.createElement('canvas');
-    tmpC.width = editorMaskData.width;
-    tmpC.height = editorMaskData.height;
-    tmpC.getContext('2d').putImageData(editorMaskData, 0, 0);
-    const blob = await new Promise(resolve => tmpC.toBlob(resolve, 'image/png'));
+    const cb = editorCropBox;
+    const IW = editorCutoutImg.width;
+    const IH = editorCutoutImg.height;
 
-    const form = collectConfig();
-    form.append('mask', blob, 'mask.png');
+    // Check if crop box extends beyond image → needs canvas padding
+    const needsExpand = cb.x < 0 || cb.y < 0 || cb.x + cb.w > IW || cb.y + cb.h > IH;
+
+    let targetId = editorImageId;
+    let maskBlob;
+
+    if (needsExpand) {
+        // Expanded canvas bounds: union of image and crop box
+        const ex = Math.min(0, cb.x);
+        const ey = Math.min(0, cb.y);
+        const ew = Math.max(IW, cb.x + cb.w) - ex;
+        const eh = Math.max(IH, cb.y + cb.h) - ey;
+        const ox = -ex;  // image top-left in expanded canvas
+        const oy = -ey;
+
+        // 1. Create padded image (white fill for regular, transparent for cutout)
+        const expCanvas = document.createElement('canvas');
+        expCanvas.width = ew;
+        expCanvas.height = eh;
+        const expCtx = expCanvas.getContext('2d');
+        const hasAlpha = editorCutoutImg.src.includes('cutout');
+        if (hasAlpha) {
+            expCtx.clearRect(0, 0, ew, eh);
+        } else {
+            expCtx.fillStyle = '#fff';
+            expCtx.fillRect(0, 0, ew, eh);
+        }
+        expCtx.drawImage(editorCutoutImg, ox, oy);
+
+        // 2. Upload padded image
+        const expBlob = await new Promise(resolve => expCanvas.toBlob(resolve, 'image/png'));
+        const uploadForm = new FormData();
+        uploadForm.append('files', expBlob, 'padded-' + editorImageId + '.png');
+        const uploadRes = await fetch(`${API}/api/upload`, { method: 'POST', body: uploadForm });
+        if (!uploadRes.ok) { alert('上传填充图片失败'); return; }
+        const uploadData = await uploadRes.json();
+        targetId = uploadData.images?.[0]?.id;
+        if (!targetId) { alert('上传填充图片失败'); return; }
+
+        // 3. All-white mask at expanded size → mask crop is a no-op (keep everything)
+        const mc = document.createElement('canvas');
+        mc.width = ew;
+        mc.height = eh;
+        const mctx = mc.getContext('2d');
+        mctx.fillStyle = '#fff';
+        mctx.fillRect(0, 0, ew, eh);
+        maskBlob = await new Promise(resolve => mc.toBlob(resolve, 'image/png'));
+    } else {
+        // Normal: mask at image size, white = crop box area
+        const mc = document.createElement('canvas');
+        mc.width = IW;
+        mc.height = IH;
+        const mctx = mc.getContext('2d');
+        mctx.fillStyle = '#000';
+        mctx.fillRect(0, 0, IW, IH);
+        mctx.fillStyle = '#fff';
+        mctx.fillRect(cb.x, cb.y, cb.w, cb.h);
+        maskBlob = await new Promise(resolve => mc.toBlob(resolve, 'image/png'));
+    }
 
     try {
-        const res = await fetch(`${API}/api/edit-mask/${editorImageId}`, { method: 'POST', body: form });
+        if (editorMode === 'mask-crop-main') {
+            const form = collectConfig();
+            form.append('mask', maskBlob, 'mask.png');
+            form.append('target_image_id', targetId);
+            const res = await fetch(`${API}/api/process`, { method: 'POST', body: form });
+            const data = await res.json();
+            if (data.batch_id) {
+                currentBatchId = data.batch_id;
+                document.getElementById('progressPanel').classList.remove('hidden');
+                initResultCards(data.batch_id);
+                connectWebSocket(data.batch_id);
+                closeEditor();
+            } else {
+                alert('提交失败: ' + (data.detail || '未知错误'));
+            }
+            return;
+        }
+
+        if (editorMode === 'mask-crop-reprocess') {
+            const form = buildReprocessForm(maskBlob);
+            if (!form) return;
+            if (needsExpand) {
+                form.set('source_image_id', targetId);
+            }
+            const res = await fetch(`${API}/api/reprocess`, { method: 'POST', body: form });
+            const data = await res.json();
+            if (data.ok) {
+                appendReprocessCard(data);
+                closeReprocess();
+                closeEditor();
+            } else {
+                alert('处理失败: ' + (data.detail || '未知错误'));
+            }
+            return;
+        }
+
+        // Default: edit existing result
+        const form = collectConfig();
+        form.append('mask', maskBlob, 'mask.png');
+        const editUrl = needsExpand ? `${API}/api/edit-mask/${targetId}` : `${API}/api/edit-mask/${editorImageId}`;
+        const res = await fetch(editUrl, { method: 'POST', body: form });
         const data = await res.json();
         if (data.ok) {
-            // 创建新的结果卡片，而不是覆盖原有卡片
             const meta = uploadedImages.find(i => i.id === editorImageId);
             const grid = document.getElementById('resultGrid');
             const newCard = document.createElement('div');
@@ -1278,13 +1811,37 @@ async function saveMask() {
                 </div>
             `;
             grid.appendChild(newCard);
+            resultPage = Math.ceil((grid.querySelectorAll('.result-card').length) / resultPerPage);
+            applyPagination();
             closeEditor();
         } else {
-            alert('保存失败');
+            alert('保存失败: ' + (data.detail || '未知错误'));
         }
     } catch (err) {
         alert('保存出错: ' + err.message);
     }
+}
+
+// ─── Entry points: mask-crop from main panel / reprocess ───
+
+function openMaskCropFromMain() {
+    if (!uploadedImages.length) {
+        alert('请先上传图片');
+        return;
+    }
+    const id = uploadedImages[0].id;
+    editorMode = 'mask-crop-main';
+    openEditor(id);
+}
+
+function openMaskCropFromReprocess() {
+    if (!reprocessSourceId) {
+        alert('请先打开「继续处理」窗口');
+        return;
+    }
+    editorMode = 'mask-crop-reprocess';
+    editorSourceRunId = reprocessRunId;
+    openEditor(reprocessSourceId);
 }
 
 // ─── 预览弹窗 ───
@@ -1401,9 +1958,12 @@ function saveSettings() {
     closeSettings();
 }
 
-// ─── 盲水印提取 ───
+// ─── 盲水印提取 [DISABLED: 功能暂屏蔽] ───
 
 async function extractWatermarkFromResult(runId, imageId) {
+    console.warn('[disabled] extractWatermarkFromResult 已禁用');
+    showWatermarkPopup({ ok: false, detail: '水印提取功能已临时关闭' });
+    return;
     try {
         const res = await fetch(`${API}/api/extract-watermark/${runId}/${imageId}`);
         const data = await res.json();
@@ -1418,6 +1978,9 @@ async function extractWatermarkFromResult(runId, imageId) {
 }
 
 async function extractWatermarkFromUrl(url) {
+    console.warn('[disabled] extractWatermarkFromUrl 已禁用');
+    showWatermarkPopup({ ok: false, detail: '水印提取功能已临时关闭' });
+    return;
     try {
         const res = await fetch(url);
         const blob = await res.blob();
@@ -1428,6 +1991,9 @@ async function extractWatermarkFromUrl(url) {
 }
 
 async function extractWatermarkFromBlob(blob) {
+    console.warn('[disabled] extractWatermarkFromBlob 已禁用');
+    showWatermarkPopup({ ok: false, detail: '水印提取功能已临时关闭' });
+    return;
     const formData = new FormData();
     formData.append('file', blob, 'watermarked.png');
 
@@ -1448,6 +2014,9 @@ async function extractWatermarkFromBlob(blob) {
 }
 
 function showWatermarkPopup(data) {
+    // [DISABLED: 水印提取功能暂屏蔽] 不再弹出结果弹窗
+    if (data && data.detail) console.info('[watermark disabled]', data.detail);
+    return;
     const body = document.getElementById('watermarkBody');
     if (!body) return;
 
@@ -1500,8 +2069,9 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-// 从上传文件提取水印（拖放或文件选择）
+// 从上传文件提取水印（拖放或文件选择）[DISABLED: 功能暂屏蔽]
 function setupExtractWatermarkUI() {
+    return;  // [DISABLED] 不再绑定拖放/选择事件
     const zone = document.getElementById('extractWatermarkZone');
     const input = document.getElementById('extractWatermarkInput');
     if (!zone || !input) return;
@@ -1527,7 +2097,8 @@ function setupExtractWatermarkUI() {
 document.addEventListener('DOMContentLoaded', setupExtractWatermarkUI);
 setTimeout(setupExtractWatermarkUI, 1000);
 
-// 点击水印弹窗遮罩关闭
-document.getElementById('watermarkOverlay').addEventListener('click', function(e) {
-    if (e.target === this) closeWatermarkPopup();
-});
+// 点击水印弹窗遮罩关闭 [DISABLED: 功能暂屏蔽]
+(function(){
+    const ov = document.getElementById('watermarkOverlay');
+    if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; }
+})();

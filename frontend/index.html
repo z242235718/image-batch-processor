@@ -310,8 +310,8 @@
                     </div>
                 </div>
 
-                <!-- Feature Toggle: 盲水印 -->
-                <div class="feature-item" id="featureBlindWatermark">
+                <!-- Feature Toggle: 盲水印 [HIDDEN: 功能暂屏蔽] -->
+                <div class="feature-item hidden" id="featureBlindWatermark">
                     <label class="feature-toggle">
                         <input type="checkbox" id="enableBlindWatermark">
                         <span class="toggle-track">
@@ -413,11 +413,19 @@
                             <input type="number" id="maxWidth" value="0" min="0">
                         </div>
                     </div>
+                    <div class="param-row param-row--full">
+                        <div class="param-group">
+                            <label>蒙版裁切</label>
+                            <button class="btn btn-outline" id="openMaskCropBtn" type="button"
+                                    onclick="openMaskCropFromMain()" disabled>打开画板框选要保留的区域</button>
+                            <p class="param-hint" style="margin-top:6px">在弹出画板中用裁切框框选要保留的区域；裁切比例预设可锁定宽高比。点击「应用编辑」后裁切到选框区域。</p>
+                        </div>
+                    </div>
                 </div>
             </section>
 
-            <!-- Blind Watermark Extraction -->
-            <section class="card">
+            <!-- Blind Watermark Extraction [HIDDEN: 功能暂屏蔽] -->
+            <section class="card hidden">
                 <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
                     <span class="step-badge">⚡</span>
                     <h2>验证水印</h2>
@@ -481,6 +489,7 @@
                 </div>
             </div>
             <div class="result-grid" id="resultGrid"></div>
+            <div class="pagination hidden" id="resultPagination"></div>
         </section>
     </main>
 
@@ -513,37 +522,53 @@
         </div>
     </div>
 
+    <!-- Download Progress Modal -->
+    <div class="modal-overlay hidden" id="downloadProgressOverlay">
+        <div class="modal download-progress-modal">
+            <div class="modal-header">
+                <h3>下载处理结果</h3>
+            </div>
+            <div class="modal-body" style="padding: 32px; text-align: center;">
+                <div class="download-progress-bar-wrap">
+                    <div class="progress-track">
+                        <div class="progress-fill download-progress-fill" id="downloadProgressFill" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="download-progress-text" id="downloadProgressText">正在打包下载...</div>
+                <div class="download-progress-detail" id="downloadProgressDetail">准备中...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Editor Modal -->
     <div class="modal-overlay hidden" id="editorOverlay">
         <div class="modal editor-modal">
             <div class="modal-header">
-                <h3>手动编辑抠图</h3>
+                <h3>蒙版裁切</h3>
                 <button class="modal-close" onclick="closeEditor()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
             <div class="editor-toolbar">
-                <button class="tool-btn active" id="toolErase" onclick="setTool('erase')">
-                    <span class="tool-icon erase-icon"></span> 擦除
-                </button>
-                <button class="tool-btn" id="toolKeep" onclick="setTool('keep')">
-                    <span class="tool-icon keep-icon"></span> 保留
-                </button>
-                <div class="tool-sep"></div>
-                <span class="tool-label">画笔</span>
-                <input type="range" id="brushSize" min="2" max="80" value="20" oninput="updateBrushSize(this.value)">
-                <span class="brush-val" id="brushSizeVal">20</span>
+                <span class="tool-label">裁切比例</span>
+                <div class="ratio-group" id="ratioGroup">
+                    <button class="ratio-btn active" data-ratio="free" onclick="setAspectRatio(null)">自由</button>
+                    <button class="ratio-btn" data-ratio="1x1" onclick="setAspectRatio(1)">1:1</button>
+                    <button class="ratio-btn" data-ratio="4x3" onclick="setAspectRatio(4/3)">4:3</button>
+                    <button class="ratio-btn" data-ratio="3x4" onclick="setAspectRatio(3/4)">3:4</button>
+                    <button class="ratio-btn" data-ratio="16x9" onclick="setAspectRatio(16/9)">16:9</button>
+                    <button class="ratio-btn" data-ratio="9x16" onclick="setAspectRatio(9/16)">9:16</button>
+                    <button class="ratio-btn" data-ratio="3x2" onclick="setAspectRatio(3/2)">3:2</button>
+                    <button class="ratio-btn" data-ratio="2x3" onclick="setAspectRatio(2/3)">2:3</button>
+                </div>
                 <div class="tool-sep"></div>
                 <button class="tool-btn" onclick="zoomInEditor()">＋</button>
                 <button class="tool-btn" onclick="zoomOutEditor()">－</button>
                 <span class="brush-val" id="editorZoomVal">100%</span>
-                <div class="tool-sep"></div>
-                <button class="tool-btn" onclick="undoEditor()">↩ 撤销</button>
-                <button class="tool-btn" onclick="resetEditor()">⟳ 重置</button>
             </div>
             <div class="editor-canvas-wrap">
                 <canvas id="editorCanvas"></canvas>
-                <div class="editor-hint">白色=保留前景 · 黑色=擦除背景</div>
+                <div class="editor-hint">拖拽框选要保留的区域 · 拖动边框或角点调整大小 · 比例预设控制宽高比</div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeEditor()">取消</button>
@@ -866,8 +891,8 @@
                         </div>
                     </div>
                 </div>
-                <!-- 盲水印 -->
-                <div class="settings-section" id="reprocessBlind">
+                <!-- 盲水印 [HIDDEN: 功能暂屏蔽] -->
+                <div class="settings-section hidden" id="reprocessBlind">
                     <div class="settings-section-header" onclick="toggleReprocessSection('reprocessBlind')">
                         <h4 style="text-transform:none">盲水印</h4>
                         <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer" onclick="event.stopPropagation()">
@@ -921,6 +946,14 @@
                                 <input type="number" id="reprocessMaxWidth" value="0" min="0">
                             </div>
                         </div>
+                        <div class="param-row param-row--full" style="margin-top:8px">
+                            <div class="param-group">
+                                <label>蒙版裁切（可选）</label>
+                                <button class="btn btn-outline" id="openReprocessMaskBtn" type="button"
+                                        onclick="openMaskCropFromReprocess()">打开画板涂抹要保留的区域</button>
+                                <p class="param-hint" style="margin-top:6px">在弹出画板中用画笔涂抹要保留的区域；提交时连同本弹窗的其他设置一起处理。</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -931,8 +964,8 @@
         </div>
     </div>
 
-    <!-- Watermark Extraction Result Modal -->
-    <div class="modal-overlay hidden" id="watermarkOverlay">
+    <!-- Watermark Extraction Result Modal [HIDDEN: 功能暂屏蔽] -->
+    <div class="modal-overlay hidden" id="watermarkOverlay" style="display:none">
         <div class="modal watermark-modal">
             <div class="modal-header">
                 <h3>🔍 水印提取结果</h3>

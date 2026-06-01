@@ -31,6 +31,7 @@ from backend.processors.watermark import (
 )
 from backend.utils.perceptual_hash import compute_phash, hamming_distance
 from backend.processors.compressor import compress_image
+from backend.processors.mask_cropper import apply_mask_crop
 
 
 def _save_png_lossless(image: Image.Image) -> bytes:
@@ -174,6 +175,15 @@ async def get_cutout(image_id: str):
     raise HTTPException(status_code=404, detail="抠图结果不存在")
 
 
+@app.get("/api/last-mask/{image_id}")
+async def get_last_mask(image_id: str):
+    """获取该图片最近一次保存的蒙版 PNG，供「再次编辑」预填画板。"""
+    last_mask_path = TEMP_DIR / f"{image_id}_last_mask.png"
+    if not last_mask_path.exists():
+        raise HTTPException(status_code=404, detail="尚未保存过蒙版")
+    return FileResponse(last_mask_path, media_type="image/png")
+
+
 # ─── 异步处理 ───
 
 @app.post("/api/process")
@@ -207,14 +217,32 @@ async def process_images(
     quality: int = Form(85),
     max_file_size_kb: int = Form(0),
     max_width: int = Form(0),
+    mask: Optional[UploadFile] = File(None),
+    target_image_id: Optional[str] = Form(None),
+    image_ids: Optional[str] = Form(None),
 ):
     if not image_store:
         raise HTTPException(status_code=400, detail="请先上传图片")
 
-    image_ids = list(image_store.keys())
-    filenames = [image_store[iid]["filename"] for iid in image_ids]
-    task = task_manager.create_task(image_ids, filenames)
+    # 如果带了蒙版 + target_image_id，则只处理这一张
+    if mask is not None and target_image_id and target_image_id in image_store:
+        image_ids_list = [target_image_id]
+    elif image_ids:
+        # 前端指定了要处理的图片 ID，只处理这些
+        ids = [iid.strip() for iid in image_ids.split(",") if iid.strip() in image_store]
+        if not ids:
+            raise HTTPException(status_code=400, detail="没有有效的图片 ID")
+        image_ids_list = ids
+    else:
+        image_ids_list = list(image_store.keys())
+    filenames = [image_store[iid]["filename"] for iid in image_ids_list]
+    task = task_manager.create_task(image_ids_list, filenames)
     task.status = TaskStatus.RUNNING
+
+    # 预读蒙版字节（mask 是一次性的 UploadFile）
+    mask_bytes: Optional[bytes] = None
+    if mask is not None:
+        mask_bytes = await mask.read()
 
     config = {
         "bg_method": bg_method,
@@ -258,13 +286,13 @@ async def process_images(
             if logo_path.exists():
                 logo_img = Image.open(logo_path).convert("RGBA")
 
-    asyncio.create_task(_batch_process(task.batch_id, image_ids, config, logo_img))
+    asyncio.create_task(_batch_process(task.batch_id, image_ids_list, config, logo_img, mask_bytes))
     # 保持引用防止被垃圾回收
     asyncio.current_task().add_done_callback(lambda _: None)
-    return {"batch_id": task.batch_id, "total": task.total}
+    return {"batch_id": task.batch_id, "total": task.total, "image_ids": image_ids_list}
 
 
-async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo_img):
+async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo_img, mask_bytes: Optional[bytes] = None):
     semaphore = asyncio.Semaphore(CONCURRENT_PROCESS_LIMIT)
 
     async def process_one(image_id: str):
@@ -273,6 +301,8 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                 return
             meta = image_store.get(image_id)
             if not meta:
+                result = ProcessResult(id=image_id, filename="unknown", status="error", error_msg="原始图片已不存在")
+                await task_manager.update_result(batch_id, result)
                 return
 
             result = ProcessResult(id=image_id, filename=meta["filename"], status="processing")
@@ -282,6 +312,9 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
 
                 # 1. 抠图
                 if config["bg_method"] != "none":
+                    if task_manager.is_cancelled(batch_id):
+                        result.status = "error"; result.error_msg = "已取消"
+                        await task_manager.update_result(batch_id, result); return
                     # 根据设置控制 ONNX 内存预分配
                     os.environ["ORT_DISABLE_CPU_MEM_ARENA"] = "1" if config["bg_disable_arena"] else "0"
                     img = await asyncio.to_thread(
@@ -294,6 +327,9 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
 
                 # 2. Logo (图片型)
                 if config["logo_enabled"] and logo_img:
+                    if task_manager.is_cancelled(batch_id):
+                        result.status = "error"; result.error_msg = "已取消"
+                        await task_manager.update_result(batch_id, result); return
                     img = await asyncio.to_thread(
                         add_logo, img, logo_img,
                         config["logo_position"],
@@ -305,6 +341,9 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
 
                 # 3. 显式水印
                 if config["wm_mode"] in ("position", "tile", "dense") and config["wm_text"]:
+                    if task_manager.is_cancelled(batch_id):
+                        result.status = "error"; result.error_msg = "已取消"
+                        await task_manager.update_result(batch_id, result); return
                     img = await asyncio.to_thread(
                         add_text_watermark, img,
                         config["wm_text"],
@@ -326,7 +365,22 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         config.get("wm_blind_use_mask", True),
                     )
 
-                # 5. 压缩
+                # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+                if mask_bytes:
+                    if task_manager.is_cancelled(batch_id):
+                        result.status = "error"; result.error_msg = "已取消"
+                        await task_manager.update_result(batch_id, result); return
+                    img = await asyncio.to_thread(apply_mask_crop, img, mask_bytes)
+                    # 保存蒙版供「再次编辑」预填
+                    last_mask_path = TEMP_DIR / f"{image_id}_last_mask.png"
+                    with open(last_mask_path, "wb") as f:
+                        f.write(mask_bytes)
+
+                if task_manager.is_cancelled(batch_id):
+                    result.status = "error"; result.error_msg = "已取消"
+                    await task_manager.update_result(batch_id, result); return
+
+                # 6. 压缩
                 if config["compress_enabled"]:
                     data = await asyncio.to_thread(
                         compress_image, img,
@@ -414,6 +468,7 @@ async def websocket_progress(websocket: WebSocket, batch_id: str):
             data = await websocket.receive_text()
             if data == "cancel":
                 task_manager.cancel_task(batch_id)
+                await task_manager.cancel_pending(batch_id)
     except WebSocketDisconnect:
         await task_manager.remove_ws(batch_id, websocket)
 
@@ -495,7 +550,10 @@ async def download_all(data: dict):
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=processed_images.zip"},
+        headers={
+            "Content-Disposition": "attachment; filename=processed_images.zip",
+            "Content-Length": str(buf.getbuffer().nbytes),
+        },
     )
 
 
@@ -606,6 +664,8 @@ async def reprocess_image(
     quality: int = Form(85),
     max_file_size_kb: int = Form(0),
     max_width: int = Form(0),
+    # 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+    mask: Optional[UploadFile] = File(None),
 ):
     """对已处理结果继续处理（抠图/Logo/水印/盲水印/压缩）"""
     # 加载已处理的结果文件
@@ -619,6 +679,9 @@ async def reprocess_image(
         raise HTTPException(status_code=404, detail="源图片不存在")
 
     img = img.convert("RGBA")
+
+    # 预读蒙版字节
+    mask_bytes: Optional[bytes] = await mask.read() if mask is not None else None
 
     # 1. 抠图
     if bg_enabled:
@@ -652,9 +715,19 @@ async def reprocess_image(
     if wm_blind_enabled and wm_blind_text:
         img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
 
-    # 5. 压缩
+    # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+    if mask_bytes:
+        img = apply_mask_crop(img, mask_bytes)
+        # 保存蒙版供「再次编辑」预填
+        last_mask_path = TEMP_DIR / f"{source_image_id}_last_mask.png"
+        with open(last_mask_path, "wb") as f:
+            f.write(mask_bytes)
+
+    # 6. 压缩
     if compress_enabled:
-        data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
+        data = compress_image(
+            img, output_format, quality, max_file_size_kb, max_width,
+        )
     else:
         fmt = output_format.upper() if output_format else "JPEG"
         if fmt in ("JPEG", "JPG"):
@@ -721,7 +794,7 @@ async def edit_mask(
     max_file_size_kb: int = Form(0),
     max_width: int = Form(0),
 ):
-    """接收前端 Canvas 编辑后的蒙版，重新合成抠图结果"""
+    """接收前端 Canvas 编辑后的蒙版，按蒙版白色像素的最小包围矩形裁切后重新合成。"""
     meta = image_store.get(image_id)
     if not meta:
         raise HTTPException(status_code=404, detail="图片不存在")
@@ -734,12 +807,15 @@ async def edit_mask(
 
         # 加载蒙版 (黑色=擦除，白色=保留)
         mask_bytes = await mask.read()
-        mask_img = await asyncio.to_thread(lambda: Image.open(io.BytesIO(mask_bytes)).convert("L"))
-        mask_img = mask_img.resize(original.size, Image.NEAREST)
 
-        # 应用蒙版
+        # 蒙版裁切（全白/缺失 = no-op；否则按白色像素 bbox 裁切）
         result_img = original.copy()
-        result_img.putalpha(mask_img)
+        if mask_bytes:
+            result_img = await asyncio.to_thread(apply_mask_crop, result_img, mask_bytes)
+            # 保存蒙版供「再次编辑」预填
+            last_mask_path = TEMP_DIR / f"{image_id}_last_mask.png"
+            with open(last_mask_path, "wb") as f:
+                f.write(mask_bytes)
 
         # 更新 cutout.png（不含 Logo/压缩），供后续再次编辑使用
         cutout_path = TEMP_DIR / f"{image_id}_cutout.png"
@@ -774,7 +850,9 @@ async def edit_mask(
 
         # 压缩
         if compress_enabled:
-            data = compress_image(result_img, output_format, quality, max_file_size_kb, max_width)
+            data = compress_image(
+                result_img, output_format, quality, max_file_size_kb, max_width,
+            )
         else:
             fmt = output_format.upper() if output_format else "JPEG"
             if fmt in ("JPEG", "JPG"):

@@ -37,6 +37,29 @@ class TaskManager:
     def is_cancelled(self, batch_id: str) -> bool:
         return self._cancel_flags.get(batch_id, False)
 
+    async def cancel_pending(self, batch_id: str):
+        """标记所有 pending 结果为已取消，确保进度到达 100%"""
+        task = self.tasks.get(batch_id)
+        if not task:
+            return
+        for r in task.results:
+            if r.status == "pending":
+                r.status = "error"
+                r.error_msg = "已取消"
+                r.finished_at = __import__('datetime').datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        done_count = sum(1 for r in task.results if r.status in ("done", "error"))
+        failed_count = sum(1 for r in task.results if r.status == "error")
+        task.done = done_count
+        task.failed = failed_count
+        task.status = TaskStatus.DONE
+        await self._broadcast(batch_id, {
+            "batch_id": batch_id,
+            "total": task.total,
+            "done": task.done,
+            "failed": task.failed,
+            "status": task.status.value,
+        })
+
     async def update_result(self, batch_id: str, result: ProcessResult):
         task = self.tasks.get(batch_id)
         if not task:

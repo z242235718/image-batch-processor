@@ -29,6 +29,7 @@ class CompressConfig(BaseModel):
     quality: int = Field(85, ge=1, le=100)
     max_file_size_kb: int = Field(0, ge=0)
     max_width: int = Field(0, ge=0)
+    # 裁切/蒙版裁切由调用方在 compress_image 之前完成（蒙版走 /api/edit-mask 等端点）
 
 
 class ProcessConfig(BaseModel):
