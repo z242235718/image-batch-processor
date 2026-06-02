@@ -64,6 +64,10 @@ function closeCutoutEditor() {
     cutoutEditor.ctx = null;
     cutoutEditor.maskCanvas = null;
     cutoutEditor.maskCtx = null;
+    // Hide custom brush cursor (appended to document.body)
+    if (cutoutEditor._cursor) {
+        cutoutEditor._cursor.style.display = 'none';
+    }
 }
 
 function setCutoutBrushMode(mode) {
@@ -211,6 +215,7 @@ function setupCutoutEditorEvents() {
     crosshair.innerHTML = '<svg viewBox="0 0 9 9" width="9" height="9"><circle cx="4.5" cy="4.5" r="1.5" fill="#fff" stroke="#333" stroke-width="0.8"/><line x1="4.5" y1="0" x2="4.5" y2="9" stroke="#fff" stroke-width="1" opacity="0.7"/><line x1="0" y1="4.5" x2="9" y2="4.5" stroke="#fff" stroke-width="1" opacity="0.7"/></svg>';
     cursor.appendChild(crosshair);
     document.body.appendChild(cursor);
+    cutoutEditor._cursor = cursor;
 
     function updateCursorStyle() {
         const isErase = cutoutEditor.brushMode === 'erase';
@@ -250,6 +255,7 @@ function setupCutoutEditorEvents() {
 
     function moveDraw(e) {
         e.preventDefault();
+        if (!cutoutEditor.ready) return;
         const pos = getPos(e);
         // Update cursor ring size to account for zoom
         const scale = canvas.getBoundingClientRect().width / canvas.width;
