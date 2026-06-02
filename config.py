@@ -15,8 +15,8 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 # 处理控制
 CONCURRENT_PROCESS_LIMIT = 4
 
-# 文件清理
-CLEANUP_AGE_HOURS = 24
+# 文件清理（结果文件保留 7 天）
+CLEANUP_AGE_HOURS = 168
 
 # remove.bg API Key (用于云端抠图)
 REMBG_API_KEY = "test123"

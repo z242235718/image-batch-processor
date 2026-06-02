@@ -1490,6 +1490,166 @@ body {
     accent-color: var(--primary);
 }
 
+/* ─── Cutout Editor ─── */
+
+#cutoutEditorOverlay .editor-modal {
+    max-width: 1100px;
+}
+
+/* Match crop-editor canvas wrap style */
+#cutoutEditorOverlay .editor-canvas-wrap {
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background: #e2e8f0;
+    min-height: 480px;
+}
+
+#cutoutEditorOverlay .editor-canvas-wrap canvas {
+    cursor: none;
+    flex-shrink: 0;
+}
+
+/* Toolbar — match .editor-toolbar (crop editor) */
+.cutout-editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: #fafbfc;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.cutout-editor-toolbar .tool-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.cutout-editor-toolbar .tool-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 4px;
+}
+
+.cutout-editor-toolbar .brush-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary);
+    min-width: 28px;
+    text-align: center;
+}
+
+/* Brush mode toggle — use tool-btn style matching crop editor */
+.brush-mode-group {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.brush-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+}
+
+.brush-mode-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.brush-mode-btn.active[data-mode="restore"] {
+    background: rgba(34,197,94,0.15);
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.brush-mode-btn.active[data-mode="erase"] {
+    background: rgba(239,68,68,0.12);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+/* Brush dot indicator */
+.brush-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+.brush-dot.restore { background: var(--success); border: 2px solid rgba(255,255,255,0.5); }
+.brush-dot.erase { background: var(--danger); border: 2px solid rgba(255,255,255,0.5); }
+
+/* Cutout slider — match standard range input */
+.cutout-editor-toolbar input[type="range"] {
+    width: 80px;
+    accent-color: var(--primary);
+}
+
+/* Zoom buttons — match .tool-btn style */
+.cutout-editor-toolbar .tool-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    min-width: 28px;
+    justify-content: center;
+}
+.cutout-editor-toolbar .tool-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* Loading spinner */
+#cutoutLoading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(226,232,240,0.85);
+    z-index: 10;
+    color: var(--text-secondary);
+    font-size: 14px;
+    gap: 12px;
+}
+#cutoutLoading .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+.cutout-editor-toolbar .zoom-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
 /* ─── Editor Canvas ─── */
 .editor-canvas-wrap {
     flex: 1;

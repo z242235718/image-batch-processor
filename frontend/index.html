@@ -577,6 +577,51 @@
         </div>
     </div>
 
+    <!-- Cutout Editor Modal -->
+    <div class="modal-overlay hidden" id="cutoutEditorOverlay">
+        <div class="modal editor-modal">
+            <div class="modal-header">
+                <h3>修改抠图</h3>
+                <button class="modal-close" onclick="closeCutoutEditor()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="cutout-editor-toolbar">
+                <div class="brush-mode-group">
+                    <button class="brush-mode-btn active" data-mode="restore" onclick="setCutoutBrushMode('restore')">
+                        <span class="brush-dot restore"></span>恢复
+                    </button>
+                    <button class="brush-mode-btn" data-mode="erase" onclick="setCutoutBrushMode('erase')">
+                        <span class="brush-dot erase"></span>擦除
+                    </button>
+                </div>
+                <div class="tool-sep"></div>
+                <label class="tool-label">画笔</label>
+                <input type="range" id="cutoutBrushSize" min="1" max="200" value="40"
+                       oninput="cutoutEditor.brushSize=parseInt(this.value);document.getElementById('cutoutBrushSizeVal').textContent=this.value">
+                <span class="brush-val" id="cutoutBrushSizeVal">40</span>
+                <div class="tool-sep"></div>
+                <div class="zoom-group">
+                    <button class="tool-btn" onclick="zoomOutCutoutEditor()" title="缩小">－</button>
+                    <span class="brush-val" id="cutoutEditorZoomVal">100%</span>
+                    <button class="tool-btn" onclick="zoomInCutoutEditor()" title="放大">＋</button>
+                </div>
+            </div>
+            <div class="editor-canvas-wrap">
+                <div class="cutout-loading" id="cutoutLoading">
+                    <div class="spinner"></div>
+                    <span>正在加载抠图结果...</span>
+                </div>
+                <canvas id="cutoutEditorCanvas"></canvas>
+                <div class="editor-hint">选择「恢复」或「擦除」模式，在画布上涂抹修改抠图区域 · 滚轮缩放</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeCutoutEditor()">取消</button>
+                <button class="btn btn-primary" onclick="saveCutoutEdit()">应用修改</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div class="modal-overlay hidden" id="settingsOverlay">
         <div class="modal settings-modal">
@@ -750,6 +795,28 @@
                     </div>
                     <div class="settings-section-content" id="reprocessLogoContent">
                         <div class="param-row param-row--full" style="margin-top:8px">
+                            <div class="param-group">
+                                <label>Logo 来源</label>
+                                <select id="reprocessLogoMode" onchange="updateReprocessLogoPreview()">
+                                    <option value="default">使用默认 Logo</option>
+                                    <option value="image">上传自定义 Logo</option>
+                                </select>
+                                <p class="param-hint" id="reprocessDefaultLogoHint" style="margin-top:4px;color:var(--text-muted);font-size:12px;white-space:nowrap;">
+                                    默认 Logo 图片及配置可在 <a href="#" onclick="openSettings();return false;" style="color:var(--primary);">设置</a> 中修改
+                                </p>
+                            </div>
+                        </div>
+                        <div class="param-row hidden" id="reprocessLogoUploadGroup">
+                            <div class="logo-upload-area">
+                                <div class="logo-upload-zone" id="reprocessLogoDropZone">
+                                    <div class="logo-preview" id="reprocessLogoPreview">
+                                        <span class="placeholder">+</span>
+                                    </div>
+                                </div>
+                                <input type="file" accept="image/*" id="reprocessLogoFileInput" style="display:none;">
+                            </div>
+                        </div>
+                        <div class="param-row param-row--full">
                             <div class="param-group">
                                 <label>位置</label>
                                 <select id="reprocessLogoPosition">
@@ -944,14 +1011,6 @@
                             <div class="param-group">
                                 <label>最大宽度 (px，0=不限)</label>
                                 <input type="number" id="reprocessMaxWidth" value="0" min="0">
-                            </div>
-                        </div>
-                        <div class="param-row param-row--full" style="margin-top:8px">
-                            <div class="param-group">
-                                <label>蒙版裁切（可选）</label>
-                                <button class="btn btn-outline" id="openReprocessMaskBtn" type="button"
-                                        onclick="openMaskCropFromReprocess()">打开画板涂抹要保留的区域</button>
-                                <p class="param-hint" style="margin-top:6px">在弹出画板中用画笔涂抹要保留的区域；提交时连同本弹窗的其他设置一起处理。</p>
                             </div>
                         </div>
                     </div>

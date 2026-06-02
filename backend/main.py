@@ -1,10 +1,11 @@
 import asyncio
 import io
+import json
 import os
 import shutil
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -20,7 +21,7 @@ from config import (
 )
 from backend.models import ProcessResult, TaskStatus
 from backend.task_manager import task_manager
-from backend.file_manager import save_uploaded_file, delete_result_files, get_output_path, periodic_cleanup
+from backend.file_manager import save_uploaded_file, delete_result_files, get_output_path, cleanup_old_files, periodic_cleanup
 from backend.utils.image_utils import generate_thumbnail
 from backend.processors.bg_remover import remove_background
 from backend.processors.logo_adder import add_logo
@@ -41,6 +42,29 @@ def _save_png_lossless(image: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+def _compute_features_str(
+    bg_method: str = "none",
+    logo_enabled: bool = False,
+    wm_mode: str = "off",
+    wm_text: str = "",
+    wm_blind_enabled: bool = False,
+    compress_enabled: bool = False,
+) -> str:
+    """根据处理参数计算 features 字符串，供 _meta.json 持久化"""
+    parts = []
+    if bg_method != "none":
+        parts.append("bg")
+    if logo_enabled:
+        parts.append("logo")
+    if wm_mode in ("position", "tile", "dense") and wm_text:
+        parts.append("watermark")
+    if wm_blind_enabled:
+        parts.append("blind")
+    if compress_enabled:
+        parts.append("compress")
+    return ",".join(parts)
+
+
 app = FastAPI(title="图片批量处理工具")
 
 app.add_middleware(
@@ -59,9 +83,39 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
 
 
+async def sunday_full_cleanup():
+    """每周日 03:00 清理所有处理结果（输出 + 临时目录）"""
+    while True:
+        now = datetime.now()
+        # 计算到下一个周日 03:00 的秒数
+        days_until_sunday = (6 - now.weekday()) % 7
+        if days_until_sunday == 0 and now.hour >= 3:
+            days_until_sunday = 7
+        next_run = (now + timedelta(days=days_until_sunday)).replace(
+            hour=3, minute=0, second=0, microsecond=0
+        )
+        wait_seconds = (next_run - now).total_seconds()
+        await asyncio.sleep(wait_seconds)
+
+        # 删除所有结果文件
+        for dir_path in [OUTPUT_DIR, TEMP_DIR]:
+            if not dir_path.exists():
+                continue
+            for f in dir_path.iterdir():
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+
+
 @app.on_event("startup")
 async def startup():
+    # 启动时立即清理过期文件（超过 7 天的结果）
+    cleanup_old_files()
+    # 后台定时任务：每小时清理过期文件
     asyncio.create_task(periodic_cleanup())
+    # 后台定时任务：每周日 03:00 彻底清理所有结果
+    asyncio.create_task(sunday_full_cleanup())
 
 
 # ─── 页面 ───
@@ -118,6 +172,35 @@ async def delete_image(image_id: str):
     image_store.pop(image_id)
     # 仅移除内存记录，不删除源文件，避免已存在的结果卡片预览失效
     return {"ok": True}
+
+
+@app.delete("/api/results")
+async def clear_all_results():
+    """清除所有处理结果文件（输出+临时目录），保留原始上传"""
+    for dir_path in [OUTPUT_DIR, TEMP_DIR]:
+        for f in dir_path.iterdir():
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    return {"ok": True}
+
+
+@app.get("/api/results")
+async def list_all_results():
+    """列出所有已保存的处理结果（供页面刷新后重新加载结果卡片）"""
+    results = []
+    for f in TEMP_DIR.iterdir():
+        if f.name.endswith("_meta.json"):
+            try:
+                with open(f) as mf:
+                    data = json.load(mf)
+                results.append(data)
+            except Exception:
+                pass
+    # 按完成时间降序排列
+    results.sort(key=lambda r: r.get("finished_at", ""), reverse=True)
+    return {"results": results}
 
 
 @app.delete("/api/results/{image_id}")
@@ -423,6 +506,31 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                 result.output_url = f"/api/download/{batch_id}/{image_id}"
                 result.thumbnail_url = f"/api/result-thumbnail/{batch_id}/{image_id}"
                 result.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # 保存结果元数据（持久化，供页面刷新后重新加载结果卡片）
+                meta_path = TEMP_DIR / f"{image_id}_{batch_id}_meta.json"
+                try:
+                    features_str = _compute_features_str(
+                        bg_method=config["bg_method"],
+                        logo_enabled=config["logo_enabled"],
+                        wm_mode=config["wm_mode"],
+                        wm_text=config.get("wm_text", ""),
+                        wm_blind_enabled=config.get("wm_blind_enabled", False),
+                        compress_enabled=config["compress_enabled"],
+                    )
+                    with open(meta_path, "w") as mf:
+                        json.dump({
+                            "id": image_id,
+                            "filename": meta["filename"],
+                            "run_id": batch_id,
+                            "features": features_str,
+                            "output_size": len(data),
+                            "output_url": f"/api/download/{batch_id}/{image_id}",
+                            "thumbnail_url": f"/api/result-thumbnail/{batch_id}/{image_id}",
+                            "finished_at": result.finished_at,
+                        }, mf)
+                except Exception:
+                    pass  # 元数据非关键，不阻塞主流程
 
                 del img, out_img
 
@@ -752,6 +860,32 @@ async def reprocess_image(
     with open(thumb_path, "wb") as f:
         f.write(thumb_data)
 
+    # 保存结果元数据（持久化）
+    _finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta_path = TEMP_DIR / f"{source_image_id}_{new_run_id}_meta.json"
+    try:
+        reprocess_features_str = _compute_features_str(
+            bg_method=bg_method if bg_enabled else "none",
+            logo_enabled=logo_enabled,
+            wm_mode=wm_mode,
+            wm_text=wm_text,
+            wm_blind_enabled=wm_blind_enabled,
+            compress_enabled=compress_enabled,
+        )
+        with open(meta_path, "w") as mf:
+            json.dump({
+                "id": source_image_id,
+                "filename": Path(out_path).name,
+                "run_id": new_run_id,
+                "features": reprocess_features_str,
+                "output_size": len(data),
+                "output_url": f"/api/download/{new_run_id}/{source_image_id}",
+                "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{source_image_id}",
+                "finished_at": _finished_at,
+            }, mf)
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "run_id": new_run_id,
@@ -874,11 +1008,195 @@ async def edit_mask(
         with open(thumb_path, "wb") as f:
             f.write(thumb_data)
 
+        # 保存结果元数据（持久化）
+        _finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        meta_path = TEMP_DIR / f"{image_id}_{edit_run_id}_meta.json"
+        try:
+            edit_features_str = _compute_features_str(
+                logo_enabled=logo_enabled,
+                wm_mode=wm_mode,
+                wm_text=wm_text,
+                wm_blind_enabled=wm_blind_enabled,
+                compress_enabled=compress_enabled,
+            )
+            with open(meta_path, "w") as mf:
+                json.dump({
+                    "id": image_id,
+                    "filename": meta.get("filename", Path(out_path).name),
+                    "run_id": edit_run_id,
+                    "features": edit_features_str,
+                    "output_size": len(data),
+                    "output_url": f"/api/download/{edit_run_id}/{image_id}",
+                    "thumbnail_url": f"/api/result-thumbnail/{edit_run_id}/{image_id}",
+                    "finished_at": _finished_at,
+                }, mf)
+        except Exception:
+            pass
+
         return {
             "ok": True,
+            "run_id": edit_run_id,
+            "image_id": image_id,
             "output_size": len(data),
             "output_url": f"/api/download/{edit_run_id}/{image_id}",
             "thumbnail_url": f"/api/result-thumbnail/{edit_run_id}/{image_id}",
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── 修改抠图（笔刷编辑器）───
+
+@app.post("/api/edit-cutout/{image_id}")
+async def edit_cutout(
+    image_id: str,
+    mask: UploadFile = File(...),
+    logo_enabled: bool = Form(False),
+    logo_position: str = Form("right-bottom"),
+    logo_ratio: float = Form(0.15),
+    logo_opacity: float = Form(0.8),
+    logo_margin: int = Form(20),
+    logo_tile: bool = Form(False),
+    logo_file_id: Optional[str] = Form(None),
+    wm_mode: str = Form("off"),
+    wm_text: Optional[str] = Form(None),
+    wm_text_color: str = Form("#FFFFFF"),
+    wm_text_ratio: float = Form(0.05),
+    wm_opacity: float = Form(0.5),
+    wm_position: str = Form("right-bottom"),
+    wm_tile_direction: str = Form("horizontal"),
+    wm_dense_density: int = Form(5),
+    wm_blind_enabled: bool = Form(False),
+    wm_blind_text: Optional[str] = Form(None),
+    wm_blind_strength: int = Form(16),
+    wm_blind_use_mask: bool = Form(True),
+    compress_enabled: bool = Form(True),
+    output_format: str = Form("JPEG"),
+    quality: int = Form(85),
+    max_file_size_kb: int = Form(0),
+    max_width: int = Form(0),
+):
+    """接收 Canvas 笔刷编辑后的抠图蒙版，修改透明通道后重新合成。"""
+    cutout_path = TEMP_DIR / f"{image_id}_cutout.png"
+    if not cutout_path.exists():
+        raise HTTPException(status_code=404, detail="抠图结果不存在，请先进行抠图处理")
+
+    try:
+        import numpy as np
+
+        # 加载抠图结果和蒙版
+        cutout_img = Image.open(cutout_path).convert("RGBA")
+        mask_bytes = await mask.read()
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")  # 灰度图
+        mask_img = mask_img.resize(cutout_img.size, Image.NEAREST)
+
+        cutout_arr = np.array(cutout_img, dtype=np.uint8)
+        mask_arr = np.array(mask_img, dtype=np.uint8)
+
+        # 应用蒙版到 alpha 通道
+        alpha = cutout_arr[:, :, 3].copy()
+        # mask = 0 → alpha = 0 (擦除), mask = 255 → alpha = 255 (恢复), mask = 127 → 不变
+        alpha = np.where(mask_arr == 0, 0, np.where(mask_arr == 255, 255, alpha))
+        cutout_arr[:, :, 3] = alpha
+
+        # 保存更新后的抠图
+        updated_cutout = Image.fromarray(cutout_arr, mode="RGBA")
+        updated_cutout.save(cutout_path, "PNG")
+
+        # 保存蒙版供再次编辑
+        last_mask_path = TEMP_DIR / f"{image_id}_last_cutout_mask.png"
+        with open(last_mask_path, "wb") as f:
+            f.write(mask_bytes)
+
+        # 后续处理（Logo/水印/压缩）
+        img = updated_cutout.copy()
+
+        # Logo
+        if logo_enabled:
+            logo_img = None
+            if logo_file_id and logo_file_id in logo_store:
+                logo_img = Image.open(logo_store[logo_file_id]["path"]).convert("RGBA")
+            else:
+                logo_path = ASSETS_DIR / "logo.png"
+                if logo_path.exists():
+                    logo_img = Image.open(logo_path).convert("RGBA")
+            if logo_img:
+                from backend.processors.logo_adder import add_logo
+                img = add_logo(img, logo_img, logo_position, logo_ratio, logo_opacity, margin=logo_margin, tile=logo_tile)
+
+        # 显式水印
+        if wm_mode in ("position", "tile", "dense") and wm_text:
+            img = add_text_watermark(
+                img, wm_text, wm_position, wm_text_ratio, wm_opacity,
+                wm_text_color, wm_mode in ("tile", "dense"),
+                wm_tile_direction, wm_mode == "dense", wm_dense_density,
+            )
+
+        # 盲水印
+        if wm_blind_enabled and wm_blind_text:
+            img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
+
+        # 压缩
+        if compress_enabled:
+            data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
+        else:
+            fmt = output_format.upper() if output_format else "JPEG"
+            if fmt in ("JPEG", "JPG"):
+                data = compress_image(img, fmt, max(quality, 95), 0, 0)
+            else:
+                data = _save_png_lossless(img)
+
+        # 保存结果文件
+        new_run_id = f"cutout-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+        ext = ext_map.get(output_format.upper(), ".jpg")
+        out_path = get_output_path(image_id, ext, run_id=new_run_id)
+        with open(out_path, "wb") as f:
+            f.write(data)
+
+        # 结果缩略图
+        out_img = Image.open(out_path)
+        thumb_data = generate_thumbnail(out_img)
+        thumb_path = TEMP_DIR / f"{image_id}_{new_run_id}_result_thumb.png"
+        with open(thumb_path, "wb") as f:
+            f.write(thumb_data)
+
+        # 结果元数据（持久化）
+        _finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        meta_path = TEMP_DIR / f"{image_id}_{new_run_id}_meta.json"
+        try:
+            cutout_features_str = _compute_features_str(
+                bg_method="local",  # edit-cutout 一定是先做了抠图
+                logo_enabled=logo_enabled,
+                wm_mode=wm_mode,
+                wm_text=wm_text,
+                wm_blind_enabled=wm_blind_enabled,
+                compress_enabled=compress_enabled,
+            )
+            with open(meta_path, "w") as mf:
+                json.dump({
+                    "id": image_id,
+                    "filename": f"{image_id}_cutout.png",
+                    "run_id": new_run_id,
+                    "features": cutout_features_str,
+                    "output_size": len(data),
+                    "output_url": f"/api/download/{new_run_id}/{image_id}",
+                    "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{image_id}",
+                    "finished_at": _finished_at,
+                }, mf)
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "run_id": new_run_id,
+            "image_id": image_id,
+            "output_size": len(data),
+            "output_url": f"/api/download/{new_run_id}/{image_id}",
+            "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{image_id}",
+            "finished_at": _finished_at,
+            "filename": f"{image_id}_cutout.png",
         }
 
     except Exception as e:

@@ -4,6 +4,475 @@ let currentBatchId = null;
 let ws = null;
 let currentFeatures = [];
 
+// ─── Cutout Editor State ───
+let cutoutEditor = {
+    imageId: null,
+    canvas: null,
+    ctx: null,
+    maskCanvas: null,    // offscreen mask canvas (same size as image)
+    maskCtx: null,
+    cutoutImg: null,     // loaded cutout PNG Image object
+    zoom: 1,
+    brushSize: 30,
+    brushMode: 'restore', // 'restore' or 'erase'
+    isDrawing: false,
+    ready: false,
+    lastX: -1,
+    lastY: -1,
+};
+
+// ─── Cutout Editor Functions ───
+
+function openCutoutEditor(imageId) {
+    cutoutEditor.imageId = imageId;
+    cutoutEditor.zoom = 1;
+    cutoutEditor.isDrawing = false;
+    cutoutEditor.ready = false;
+    cutoutEditor.lastX = -1;
+    cutoutEditor.lastY = -1;
+    cutoutEditor.brushSize = parseInt(document.getElementById('cutoutBrushSize').value) || 40;
+
+    // Reset toolbar UI
+    document.querySelectorAll('.brush-mode-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.brush-mode-btn[data-mode="restore"]')?.classList.add('active');
+    document.getElementById('cutoutEditorZoomVal').textContent = '100%';
+
+    // Show modal with loading spinner
+    document.getElementById('cutoutLoading').classList.remove('hidden');
+    document.getElementById('cutoutEditorOverlay').classList.remove('hidden');
+
+    const img = new Image();
+    img.onload = () => {
+        cutoutEditor.cutoutImg = img;
+        initCutoutEditorCanvas();
+        document.getElementById('cutoutLoading').classList.add('hidden');
+    };
+    img.onerror = () => {
+        document.getElementById('cutoutLoading').classList.add('hidden');
+        alert('加载抠图结果失败，请先进行抠图处理');
+        closeCutoutEditor();
+    };
+    img.src = `${API}/api/cutout/${imageId}?t=${Date.now()}`;
+}
+
+function closeCutoutEditor() {
+    document.getElementById('cutoutEditorOverlay').classList.add('hidden');
+    cutoutEditor.ready = false;
+    cutoutEditor.imageId = null;
+    cutoutEditor.cutoutImg = null;
+    cutoutEditor.canvas = null;
+    cutoutEditor.ctx = null;
+    cutoutEditor.maskCanvas = null;
+    cutoutEditor.maskCtx = null;
+}
+
+function setCutoutBrushMode(mode) {
+    cutoutEditor.brushMode = mode;
+    document.querySelectorAll('.brush-mode-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.brush-mode-btn[data-mode="${mode}"]`)?.classList.add('active');
+    // Update cursor style if it exists (cursor is appended to document.body)
+    const fillEl = document.querySelector('[data-brush-fill]');
+    const ringEl = document.querySelector('[data-brush-ring]');
+    if (fillEl && ringEl) {
+        const isErase = mode === 'erase';
+        ringEl.style.border = isErase ? '2px solid rgba(220,50,50,0.9)' : '2px solid rgba(50,180,50,0.9)';
+        fillEl.style.background = isErase ? 'rgba(220,50,50,0.12)' : 'rgba(50,180,50,0.12)';
+        fillEl.style.border = isErase ? '1px solid rgba(220,50,50,0.25)' : '1px solid rgba(50,180,50,0.25)';
+    }
+}
+
+function zoomInCutoutEditor() {
+    if (!cutoutEditor.ready) return;
+    cutoutEditor.zoom = Math.min(5, cutoutEditor.zoom * 1.2);
+    applyCutoutEditorZoom();
+}
+
+function zoomOutCutoutEditor() {
+    if (!cutoutEditor.ready) return;
+    cutoutEditor.zoom = Math.max(0.2, cutoutEditor.zoom / 1.2);
+    applyCutoutEditorZoom();
+}
+
+function applyCutoutEditorZoom() {
+    const canvas = cutoutEditor.canvas;
+    const img = cutoutEditor.cutoutImg;
+    if (!canvas || !img) return;
+    const z = cutoutEditor.zoom;
+    canvas.style.width = Math.round(img.width * z) + 'px';
+    canvas.style.height = Math.round(img.height * z) + 'px';
+    document.getElementById('cutoutEditorZoomVal').textContent = Math.round(z * 100) + '%';
+    // Keep the image centered after zoom
+    requestAnimationFrame(() => adjustCutoutEditorScroll());
+}
+
+function adjustCutoutEditorScroll() {
+    const wrap = document.querySelector('#cutoutEditorOverlay .editor-canvas-wrap');
+    const canvas = cutoutEditor.canvas;
+    if (!wrap || !canvas) return;
+    // Canvas fits → center it; overflow → top-left for full scroll range
+    const fits = canvas.offsetWidth <= wrap.clientWidth && canvas.offsetHeight <= wrap.clientHeight;
+    wrap.style.justifyContent = '';  // reset
+    wrap.style.alignItems = '';
+    if (fits) {
+        wrap.style.justifyContent = 'center';
+        wrap.style.alignItems = 'center';
+    } else {
+        wrap.style.justifyContent = 'flex-start';
+        wrap.style.alignItems = 'flex-start';
+        wrap.scrollLeft = 0;
+        wrap.scrollTop = 0;
+    }
+}
+
+function initCutoutEditorCanvas() {
+    const canvas = document.getElementById('cutoutEditorCanvas');
+    const ctx = canvas.getContext('2d');
+    cutoutEditor.canvas = canvas;
+    cutoutEditor.ctx = ctx;
+
+    const img = cutoutEditor.cutoutImg;
+    canvas.width = img.width;
+    canvas.height = img.height;
+
+    // Offscreen mask canvas — filled with 127 (neutral: no change)
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = img.width;
+    maskCanvas.height = img.height;
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.fillStyle = 'rgb(127, 127, 127)';
+    maskCtx.fillRect(0, 0, img.width, img.height);
+    cutoutEditor.maskCanvas = maskCanvas;
+    cutoutEditor.maskCtx = maskCtx;
+
+    applyCutoutEditorZoom();
+    renderCutoutEditor();
+    requestAnimationFrame(() => adjustCutoutEditorScroll());
+    cutoutEditor.ready = true;
+
+    // Setup events once
+    if (!canvas._cutoutEvents) {
+        canvas._cutoutEvents = true;
+        setupCutoutEditorEvents();
+    }
+}
+
+function renderCutoutEditor() {
+    const ctx = cutoutEditor.ctx;
+    const img = cutoutEditor.cutoutImg;
+    const canvas = cutoutEditor.canvas;
+    if (!ctx || !img) return;
+
+    // 1. Checkerboard background (shows through transparent areas)
+    drawCheckerboard(ctx, 0, 0, canvas.width, canvas.height);
+
+    // 2. Cutout image with mask composited into alpha channel
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(img, 0, 0);
+
+    const imgData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+    const maskData = cutoutEditor.maskCtx.getImageData(0, 0, canvas.width, canvas.height);
+
+    for (let i = 3; i < imgData.data.length; i += 4) {
+        const m = maskData.data[i - 3]; // R channel of grayscale mask
+        if (m === 0) {
+            imgData.data[i] = 0;         // erase → transparent
+        } else if (m === 255) {
+            imgData.data[i] = 255;       // restore → opaque
+        }
+        // 127 → keep original alpha
+    }
+    tempCtx.putImageData(imgData, 0, 0);
+    ctx.drawImage(tempCanvas, 0, 0);
+}
+
+function setupCutoutEditorEvents() {
+    const canvas = cutoutEditor.canvas;
+    const wrap = canvas.parentElement;
+
+    // Floating brush cursor — visible ring + semi-transparent fill + crosshair
+    const cursor = document.createElement('div');
+    cursor.style.cssText = 'position:fixed;pointer-events:none;border-radius:50%;display:none;z-index:1000;transform:translate(-50%,-50%)';
+    // Outer ring element
+    const ring = document.createElement('div');
+    ring.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;border-radius:50%;box-sizing:border-box;pointer-events:none';
+    ring.setAttribute('data-brush-ring', '');
+    cursor.appendChild(ring);
+    // Fill element (inner semi-transparent overlay)
+    const fill = document.createElement('div');
+    fill.style.cssText = 'position:absolute;top:2px;left:2px;width:calc(100% - 4px);height:calc(100% - 4px);border-radius:50%;box-sizing:border-box;pointer-events:none;transition:opacity 0.05s';
+    fill.setAttribute('data-brush-fill', '');
+    cursor.appendChild(fill);
+    // Crosshair center
+    const crosshair = document.createElement('div');
+    crosshair.style.cssText = 'position:absolute;top:50%;left:50%;width:9px;height:9px;transform:translate(-50%,-50%);pointer-events:none';
+    crosshair.innerHTML = '<svg viewBox="0 0 9 9" width="9" height="9"><circle cx="4.5" cy="4.5" r="1.5" fill="#fff" stroke="#333" stroke-width="0.8"/><line x1="4.5" y1="0" x2="4.5" y2="9" stroke="#fff" stroke-width="1" opacity="0.7"/><line x1="0" y1="4.5" x2="9" y2="4.5" stroke="#fff" stroke-width="1" opacity="0.7"/></svg>';
+    cursor.appendChild(crosshair);
+    document.body.appendChild(cursor);
+
+    function updateCursorStyle() {
+        const isErase = cutoutEditor.brushMode === 'erase';
+        if (isErase) {
+            ring.style.border = '2px solid rgba(220,50,50,0.9)';
+            fill.style.background = 'rgba(220,50,50,0.12)';
+            fill.style.border = '1px solid rgba(220,50,50,0.25)';
+        } else {
+            ring.style.border = '2px solid rgba(50,180,50,0.9)';
+            fill.style.background = 'rgba(50,180,50,0.12)';
+            fill.style.border = '1px solid rgba(50,180,50,0.25)';
+        }
+    }
+    updateCursorStyle();
+
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = e.touches ? e.touches[0].clientX : e.clientX;
+        const cy = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: Math.round((cx - rect.left) * (canvas.width / rect.width)),
+            y: Math.round((cy - rect.top) * (canvas.height / rect.height)),
+        };
+    }
+
+    function startDraw(e) {
+        e.preventDefault();
+        if (!cutoutEditor.ready) return;
+        cutoutEditor.isDrawing = true;
+        const pos = getPos(e);
+        cutoutEditor.lastX = pos.x;
+        cutoutEditor.lastY = pos.y;
+        // Make fill more visible while drawing
+        fill.style.opacity = '0.5';
+        paintAt(pos.x, pos.y);
+    }
+
+    function moveDraw(e) {
+        e.preventDefault();
+        const pos = getPos(e);
+        // Update cursor ring size to account for zoom
+        const scale = canvas.getBoundingClientRect().width / canvas.width;
+        const bs = Math.round(cutoutEditor.brushSize * scale);
+        const outerSize = bs + 8;
+        cursor.style.width = outerSize + 'px';
+        cursor.style.height = outerSize + 'px';
+        cursor.style.left = (e.touches ? e.touches[0].clientX : e.clientX) + 'px';
+        cursor.style.top = (e.touches ? e.touches[0].clientY : e.clientY) + 'px';
+        cursor.style.display = 'block';
+
+        if (cutoutEditor.isDrawing) {
+            paintLine(cutoutEditor.lastX, cutoutEditor.lastY, pos.x, pos.y);
+            cutoutEditor.lastX = pos.x;
+            cutoutEditor.lastY = pos.y;
+        }
+    }
+
+    function endDraw(e) {
+        if (!cutoutEditor.isDrawing) return;
+        cutoutEditor.isDrawing = false;
+        cutoutEditor.lastX = -1;
+        cutoutEditor.lastY = -1;
+        fill.style.opacity = '';
+        cursor.style.display = 'none';
+        // Full re-render to ensure perfect accumulation
+        renderCutoutEditor();
+    }
+
+    wrap.addEventListener('mousedown', startDraw);
+    window.addEventListener('mousemove', moveDraw);
+    window.addEventListener('mouseup', endDraw);
+    wrap.addEventListener('touchstart', startDraw, { passive: false });
+    window.addEventListener('touchmove', moveDraw, { passive: false });
+    window.addEventListener('touchend', endDraw);
+
+    // Wheel zoom
+    wrap.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (!cutoutEditor.ready) return;
+        cutoutEditor.zoom = e.deltaY < 0
+            ? Math.min(5, cutoutEditor.zoom * 1.1)
+            : Math.max(0.2, cutoutEditor.zoom / 1.1);
+        applyCutoutEditorZoom();
+        renderCutoutEditor();
+    }, { passive: false });
+
+    // Hide cursor when leaving canvas
+    wrap.addEventListener('mouseleave', () => {
+        cursor.style.display = 'none';
+        if (cutoutEditor.isDrawing) {
+            cutoutEditor.isDrawing = false;
+            renderCutoutEditor();
+        }
+    });
+}
+
+function paintAt(x, y) {
+    const maskCtx = cutoutEditor.maskCtx;
+    const bs = cutoutEditor.brushSize;
+    const isRestore = cutoutEditor.brushMode === 'restore';
+    const c = isRestore ? 255 : 0;
+    maskCtx.fillStyle = `rgb(${c},${c},${c})`;
+    maskCtx.beginPath();
+    maskCtx.arc(x, y, bs / 2, 0, Math.PI * 2);
+    maskCtx.fill();
+
+    // Real-time effect: composite the brush bounding box
+    const r = bs / 2;
+    const img = cutoutEditor.cutoutImg;
+    const sx = Math.max(0, x - r);
+    const sy = Math.max(0, y - r);
+    const sw = Math.min(img.width - sx, r * 2);
+    const sh = Math.min(img.height - sy, r * 2);
+    if (sw > 0 && sh > 0) applyCutoutBrushRegion(sx, sy, sw, sh);
+}
+
+function paintLine(x1, y1, x2, y2) {
+    const maskCtx = cutoutEditor.maskCtx;
+    const bs = cutoutEditor.brushSize;
+    const isRestore = cutoutEditor.brushMode === 'restore';
+    const c = isRestore ? 255 : 0;
+    maskCtx.strokeStyle = `rgb(${c},${c},${c})`;
+    maskCtx.lineWidth = bs;
+    maskCtx.lineCap = 'round';
+    maskCtx.lineJoin = 'round';
+    maskCtx.beginPath();
+    maskCtx.moveTo(x1, y1);
+    maskCtx.lineTo(x2, y2);
+    maskCtx.stroke();
+
+    // Real-time effect: composite the bounding box of the entire line segment ONCE
+    // (the full stroke is already on the mask canvas above)
+    const r = bs / 2;
+    const img = cutoutEditor.cutoutImg;
+    const sx = Math.max(0, Math.min(x1, x2) - r);
+    const sy = Math.max(0, Math.min(y1, y2) - r);
+    const ex = Math.min(img.width, Math.max(x1, x2) + r);
+    const ey = Math.min(img.height, Math.max(y1, y2) + r);
+    const sw = ex - sx;
+    const sh = ey - sy;
+    if (sw > 0 && sh > 0) applyCutoutBrushRegion(sx, sy, sw, sh);
+}
+
+/**
+ * Real-time brush region composite: renders checkerboard + cutout-with-mask
+ * for the given bounding box (sx, sy, sw, sh) on the display canvas.
+ * Uses direct pixel blending to avoid any GPU/drawImage alpha premultiplication issues.
+ */
+function applyCutoutBrushRegion(sx, sy, sw, sh) {
+    const ctx = cutoutEditor.ctx;
+    const img = cutoutEditor.cutoutImg;
+    const maskCtx = cutoutEditor.maskCtx;
+
+    // 1. Read cutout image pixels for this region via a temp canvas
+    const tc = document.createElement('canvas');
+    tc.width = sw;
+    tc.height = sh;
+    const tctx = tc.getContext('2d');
+    tctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    const imgData = tctx.getImageData(0, 0, sw, sh);
+
+    // 2. Read mask data for this region
+    const maskData = maskCtx.getImageData(sx, sy, sw, sh);
+
+    // 3. Draw fresh checkerboard directly on the display canvas at this region
+    drawCheckerboard(ctx, sx, sy, sw, sh);
+
+    // 4. Read back the checkerboard pixels (now in the display canvas)
+    const cbData = ctx.getImageData(sx, sy, sw, sh);
+
+    // 5. Manually blend cutout pixels onto checkerboard based on mask-modified alpha
+    const d = imgData.data;
+    const cb = cbData.data;
+    const mk = maskData.data;
+    for (let i = 0; i < d.length; i += 4) {
+        const m = mk[i]; // R channel of grayscale mask
+        let srcAlpha;
+        if (m === 0) {
+            srcAlpha = 0;        // erase → fully transparent
+        } else if (m === 255) {
+            srcAlpha = 255;      // restore → fully opaque
+        } else {
+            srcAlpha = d[i + 3]; // keep original cutout alpha
+        }
+        // Blend: result = src * a + dst * (1 - a)
+        const a = srcAlpha / 255;
+        const ia = 1 - a;
+        cb[i]     = Math.round(d[i]     * a + cb[i]     * ia);
+        cb[i + 1] = Math.round(d[i + 1] * a + cb[i + 1] * ia);
+        cb[i + 2] = Math.round(d[i + 2] * a + cb[i + 2] * ia);
+        cb[i + 3] = 255; // always opaque for display
+    }
+
+    // 6. Write blended result directly to the display canvas
+    ctx.putImageData(cbData, sx, sy);
+}
+
+async function saveCutoutEdit() {
+    if (!cutoutEditor.imageId || !cutoutEditor.maskCanvas) return;
+
+    const btn = document.querySelector('#cutoutEditorOverlay .btn-primary');
+    if (btn) btn.disabled = true;
+
+    try {
+        const maskBlob = await new Promise(resolve => cutoutEditor.maskCanvas.toBlob(resolve, 'image/png'));
+        if (!maskBlob) { alert('生成蒙版失败'); return; }
+
+        const form = collectConfig();
+        form.append('mask', maskBlob, 'mask.png');
+
+        const res = await fetch(`${API}/api/edit-cutout/${cutoutEditor.imageId}`, { method: 'POST', body: form });
+        const data = await res.json();
+
+        if (data.ok) {
+            // Append result card
+            const grid = document.getElementById('resultGrid');
+            const cardId = `result-${cutoutEditor.imageId}-cutout-${Date.now()}`;
+            const features = collectFeatures();
+            const hasBg = features.includes('bg');
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.id = cardId;
+            card.dataset.imageId = cutoutEditor.imageId;
+            card.dataset.features = features.join(',');
+            card.innerHTML = `
+                <div class="preview-row">
+                    <div class="before">
+                        <img src="${API}/api/cutout/${cutoutEditor.imageId}?t=${Date.now()}" onerror="this.style.display='none'">
+                        <span class="label">编辑前</span>
+                    </div>
+                    <div class="after">
+                        <img src="${API}${data.thumbnail_url}?t=${Date.now()}" onerror="this.style.display='none'">
+                        <span class="label">已编辑</span>
+                    </div>
+                </div>
+                <div class="meta">
+                    <span class="filename">${cutoutEditor.imageId}_cutout.png</span>
+                    <span class="size">${(data.output_size / 1024 / 1024).toFixed(2)} MB</span>
+                </div>
+                <div class="actions">
+                    <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
+                    <button class="btn btn-outline btn-sm" onclick="showPreview('${cutoutEditor.imageId}', '${API}${data.output_url}', '${cutoutEditor.imageId}_cutout.png')">预览</button>
+                    ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${cutoutEditor.imageId}')">修改抠图</button>` : ''}
+                    <button class="btn btn-outline btn-sm" onclick="openEditor('${cutoutEditor.imageId}')">裁切</button>
+                    <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${cutoutEditor.imageId}', '${features.join(',')}')">继续处理</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
+                </div>
+            `;
+            grid.appendChild(card);
+            resultPage = Math.ceil((grid.querySelectorAll('.result-card').length) / resultPerPage);
+            applyPagination();
+            closeCutoutEditor();
+        } else {
+            alert('保存失败: ' + (data.detail || '未知错误'));
+        }
+    } catch (err) {
+        alert('保存出错: ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // ─── Pagination ───
 let resultPage = 1;
 let resultPerPage = 20;
@@ -638,6 +1107,8 @@ function updateResultCard(result, itemPct) {
         const meta = uploadedImages.find(i => i.id === result.id);
         card.dataset.features = currentFeatures.join(',');
         const featuresStr = card.dataset.features;
+        const features = card.dataset.features ? card.dataset.features.split(',') : [];
+        const hasBg = features.includes('bg');
         card.innerHTML = `
             <div class="preview-row">
                 <div class="before">
@@ -657,7 +1128,8 @@ function updateResultCard(result, itemPct) {
             <div class="actions">
                 <a class="btn btn-primary btn-sm" href="${API}${result.output_url}" download>下载</a>
                 <button class="btn btn-outline btn-sm" onclick="showPreview('${result.id}', '${API}${result.output_url}', '${result.filename}')">预览</button>
-                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">修改</button>
+                ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${result.id}')">修改抠图</button>` : ''}
+                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
                 <button class="btn btn-outline btn-sm" onclick="openReprocess('${result.run_id}', '${result.id}', '${featuresStr}')">继续处理</button>
                 <!-- [HIDDEN: 盲水印提取功能暂屏蔽] <button class="btn btn-outline btn-sm" onclick="extractWatermarkFromResult('${result.run_id}', '${result.id}')">提取水印</button> -->
                 <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
@@ -675,7 +1147,7 @@ function updateResultCard(result, itemPct) {
                 <span class="size">${(result.output_size / 1024 / 1024).toFixed(2)} MB</span>
             </div>
             <div class="actions">
-                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">修改</button>
+                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
             </div>
         `;
@@ -967,13 +1439,14 @@ function buildReprocessForm(maskBlob) {
 
 function appendReprocessCard(data) {
     const meta = uploadedImages.find(i => i.id === data.image_id);
+    const reprocessFeatures = collectReprocessFeatures();
+    const hasBg = reprocessFeatures.includes('bg');
     const grid = document.getElementById('resultGrid');
     const card = document.createElement('div');
     card.className = 'result-card';
     card.id = `result-reprocess-${Date.now()}`;
     card.dataset.runId = data.run_id;
     card.dataset.imageId = data.image_id;
-    const reprocessFeatures = collectReprocessFeatures();
     card.dataset.features = reprocessFeatures.join(',');
     card.innerHTML = `
         <div class="preview-row">
@@ -994,6 +1467,8 @@ function appendReprocessCard(data) {
         <div class="actions">
             <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
             <button class="btn btn-outline btn-sm" onclick="showPreview('${data.image_id}', '${API}${data.output_url}', '${data.filename}')">预览</button>
+            ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${data.image_id}')">修改抠图</button>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="openEditor('${data.image_id}')">裁切</button>
             <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${data.image_id}', '${card.dataset.features}')">继续处理</button>
             <button class="btn btn-danger btn-sm" onclick="deleteResult('${card.id}')">删除</button>
         </div>
@@ -1003,7 +1478,10 @@ function appendReprocessCard(data) {
     applyPagination();
 }
 
-function clearAll() {
+async function clearAll() {
+    try {
+        await fetch(`${API}/api/results`, { method: 'DELETE' });
+    } catch (e) {}
     uploadedImages = [];
     renderImages();
     document.getElementById('progressSection').classList.add('hidden');
@@ -1230,12 +1708,16 @@ function initEditorCanvas() {
 
 // ─── Crop View Rendering ───
 
-/** Draw a checkerboard pattern over the given rect (cell size = cs). */
+/** Draw a checkerboard pattern over the given rect (cell size = cs).
+ *  Uses world-coordinate-based cell calculation so patterns align
+ *  when drawing sub-regions at different (x, y) offsets on the same grid. */
 function drawCheckerboard(ctx, x, y, w, h, cs) {
     cs = cs || 10;
     for (let iy = 0; iy < h; iy += cs) {
         for (let ix = 0; ix < w; ix += cs) {
-            const light = ((ix / cs + iy / cs) % 2 === 0);
+            const cellX = Math.floor((x + ix) / cs);
+            const cellY = Math.floor((y + iy) / cs);
+            const light = ((cellX + cellY) % 2 === 0);
             ctx.fillStyle = light ? '#d0d0d0' : '#ffffff';
             ctx.fillRect(x + ix, y + iy, Math.min(cs, w - ix), Math.min(cs, h - iy));
         }
@@ -1782,12 +2264,14 @@ async function saveMask() {
         const data = await res.json();
         if (data.ok) {
             const meta = uploadedImages.find(i => i.id === editorImageId);
+            const editFeatures = collectFeatures();
+            const editHasBg = editFeatures.includes('bg');
             const grid = document.getElementById('resultGrid');
             const newCard = document.createElement('div');
             newCard.className = 'result-card';
             newCard.id = `result-${editorImageId}-edit-${Date.now()}`;
             newCard.dataset.imageId = editorImageId;
-            newCard.dataset.features = collectFeatures().join(',');
+            newCard.dataset.features = editFeatures.join(',');
             newCard.innerHTML = `
                 <div class="preview-row">
                     <div class="before">
@@ -1801,12 +2285,14 @@ async function saveMask() {
                 </div>
                 <div class="meta">
                     <span class="filename">${meta ? meta.filename : ''}</span>
-                    <span class="size">${(data.output_size / 1024).toFixed(1)} KB</span>
+                    <span class="size">${(data.output_size / 1024 / 1024).toFixed(2)} MB</span>
                 </div>
                 <div class="actions">
                     <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
                     <button class="btn btn-outline btn-sm" onclick="showPreview('${editorImageId}', '${API}${data.output_url}', '${meta ? meta.filename : ''}')">预览</button>
+                    ${editHasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${editorImageId}')">修改抠图</button>` : ''}
                     <button class="btn btn-outline btn-sm" onclick="openEditor('${editorImageId}')">再次编辑</button>
+                    <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${editorImageId}', '${editFeatures.join(',')}')">继续处理</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteResult('${newCard.id}')">删除</button>
                 </div>
             `;
@@ -2069,6 +2555,68 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+async function loadPersistedResults() {
+    try {
+        const res = await fetch(`${API}/api/results`);
+        const data = await res.json();
+        if (!data.results || !data.results.length) return;
+        const grid = document.getElementById('resultGrid');
+        // 如果有 WebSocket 批次卡片（处理中），不覆盖
+        if (grid.querySelector('.status-processing')) return;
+        grid.innerHTML = '';
+        data.results.forEach(r => {
+            const cardId = r.run_id ? `result-${r.run_id}-${r.id}` : `result-${r.id}`;
+            if (document.getElementById(cardId)) return;
+            const features = r.features ? r.features.split(',').filter(Boolean) : [];
+            const hasBg = features.includes('bg');
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.id = cardId;
+            card.dataset.runId = r.run_id || '';
+            card.dataset.imageId = r.id;
+            card.dataset.features = r.features || '';
+            const beforeThumbUrl = `${API}/api/thumbnail/${r.id}`;
+            card.innerHTML = `
+                <div class="preview-row">
+                    <div class="before">
+                        <img src="${beforeThumbUrl}" onerror="this.style.display='none'">
+                        <span class="label">原图</span>
+                    </div>
+                    <div class="after">
+                        <img src="${API}${r.thumbnail_url}" onerror="this.style.display='none'">
+                        <span class="label">处理后</span>
+                    </div>
+                </div>
+                <div class="meta">
+                    <span class="filename" title="${escapeHtml(r.filename)}">${r.filename && r.filename.length > 10 ? escapeHtml(r.filename.slice(0, 10)) + '...' : escapeHtml(r.filename || '')}</span>
+                    ${r.finished_at ? `<span class="time">${escapeHtml(r.finished_at)}</span>` : ''}
+                    <span class="size">${(r.output_size / 1024 / 1024).toFixed(2)} MB</span>
+                </div>
+                <div class="actions">
+                    <a class="btn btn-primary btn-sm" href="${API}${r.output_url}" download>下载</a>
+                    <button class="btn btn-outline btn-sm" onclick="showPreview('${r.id}', '${API}${r.output_url}', '${escapeHtml(r.filename || '')}')">预览</button>
+                    ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${r.id}')">修改抠图</button>` : ''}
+                    <button class="btn btn-outline btn-sm" onclick="openEditor('${r.id}')">裁切</button>
+                    <button class="btn btn-outline btn-sm" onclick="openReprocess('${r.run_id}', '${r.id}', '${r.features || ''}')">继续处理</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+        document.getElementById('progressSection').classList.remove('hidden');
+        // 显示下载全部按钮（如果有可下载的结果）
+        const hasDownloadable = Array.from(grid.querySelectorAll('.result-card')).some(c =>
+            c.querySelector('.actions a[download]')
+        );
+        const dlBtn = document.getElementById('downloadAllBtn');
+        if (dlBtn) dlBtn.classList.toggle('hidden', !hasDownloadable);
+        resultPage = 1;
+        applyPagination();
+    } catch (e) {
+        // 无持久化结果，静默忽略
+    }
+}
+
 // 从上传文件提取水印（拖放或文件选择）[DISABLED: 功能暂屏蔽]
 function setupExtractWatermarkUI() {
     return;  // [DISABLED] 不再绑定拖放/选择事件
@@ -2094,8 +2642,10 @@ function setupExtractWatermarkUI() {
 }
 
 // 延迟初始化提取UI
-document.addEventListener('DOMContentLoaded', setupExtractWatermarkUI);
-setTimeout(setupExtractWatermarkUI, 1000);
+document.addEventListener('DOMContentLoaded', () => {
+    setupExtractWatermarkUI();
+    loadPersistedResults();
+});
 
 // 点击水印弹窗遮罩关闭 [DISABLED: 功能暂屏蔽]
 (function(){
