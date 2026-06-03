@@ -1,0 +1,430 @@
+Inno Setup 6 Command-Line Compiler
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+Portions Copyright (C) 2001-2004 Alex Yackimoff. All rights reserved.
+https://www.innosetup.com
+
+Compiler engine version: Inno Setup 6.7.3
+Non-commercial use only
+
+Preprocessing
+   Reading file: D:\Program Files\Inno Setup 6\ISPPBuiltins.iss
+Parsing [Setup] section, line 13
+Parsing [Setup] section, line 14
+Parsing [Setup] section, line 15
+Parsing [Setup] section, line 16
+Parsing [Setup] section, line 17
+Parsing [Setup] section, line 18
+Parsing [Setup] section, line 21
+Parsing [Setup] section, line 22
+Parsing [Setup] section, line 23
+Parsing [Setup] section, line 26
+Parsing [Setup] section, line 27
+Parsing [Setup] section, line 30
+Parsing [Setup] section, line 31
+Parsing [Setup] section, line 32
+Parsing [Setup] section, line 35
+Parsing [Setup] section, line 36
+Parsing [Setup] section, line 39
+Parsing [Setup] section, line 40
+Parsing [Setup] section, line 43
+Parsing [Setup] section, line 44
+Parsing [Setup] section, line 45
+Reading file (WizardImageFile)
+Reading file (WizardSmallImageFile)
+Preparing Setup program executable
+   Verification successful
+   Updating icons (Setup.e32)
+   Updating version info (Setup.e32)
+Determining language code pages
+Parsing [Languages] section, line 48
+   Reading file: D:\Program Files\Inno Setup 6\Languages\ChineseSimplified.isl
+Parsing [Languages] section, line 49
+   Reading file: D:\Program Files\Inno Setup 6\Default.isl
+   Messages in script file
+Reading default messages from Default.isl
+Parsing [Languages] section, line 48
+   Reading file: D:\Program Files\Inno Setup 6\Languages\ChineseSimplified.isl
+Parsing [Languages] section, line 49
+   Reading file: D:\Program Files\Inno Setup 6\Default.isl
+Parsing [LangOptions], [Messages], and [CustomMessages] sections
+   Messages in script file
+Reading [Code] section
+Parsing [Tasks] section, line 52
+Parsing [Icons] section, line 64
+Parsing [Icons] section, line 65
+Parsing [Icons] section, line 66
+Parsing [Run] section, line 70
+Parsing [UninstallRun] section, line 74
+Parsing [Files] section, line 56
+Compiling [Code] section
+Deleting ImageBatchProcessor_Setup_v0.0.2.exe from output directory
+Creating setup files
+   Verification successful
+   Updating icons (Setup.exe)
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\ImageBatchProcessor.exe
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\81d243bd2c585b0f4821__mypyc.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\base_library.zip
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\libcrypto-3.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\libffi-8.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\libssl-3.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\msvcp140.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\MSVCP140_1.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\python314.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\select.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\unicodedata.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\VCOMP140.DLL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\vcruntime140.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\vcruntime140_1.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_asyncio.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_bz2.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_ctypes.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_decimal.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_hashlib.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_lzma.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_multiprocessing.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_overlapped.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_queue.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_socket.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_ssl.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_uuid.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_wmi.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_zoneinfo.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\_zstd.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\assets\logo.png
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\attrs-26.1.0.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\attrs-26.1.0.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\attrs-26.1.0.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\attrs-26.1.0.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\attrs-26.1.0.dist-info\licenses\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\certifi\cacert.pem
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\certifi\py.typed
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\charset_normalizer\cd.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\charset_normalizer\md.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\click-8.3.3.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\click-8.3.3.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\click-8.3.3.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\click-8.3.3.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\click-8.3.3.dist-info\licenses\LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\frontend\app.js
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\frontend\index.html
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\frontend\style.css
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\httptools\parser\parser.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\httptools\parser\url_parser.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema\benchmarks\issue232\issue.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\entry_points.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema-4.26.0.dist-info\licenses\COPYING
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\applicator
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\content
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\core
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\format
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\meta-data
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft201909\vocabularies\validation
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\applicator
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\content
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\core
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\format-annotation
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\format-assertion
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\meta-data
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\unevaluated
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft202012\vocabularies\validation
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft3\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft4\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft6\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\jsonschema_specifications\schemas\draft7\metaschema.json
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\llvmlite\binding\llvmlite.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\llvmlite.libs\msvcp140-8f141b4454fa78db34bc1f28c571b4da.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\mviewbuf.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\_devicearray.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\_dispatcher.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\_dynfunc.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\_helperlib.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\core\runtime\_nrt_python.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\core\typeconv\_typeconv.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\cuda\cudadrv\_extras.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\experimental\jitclass\_box.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\np\ufunc\omppool.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\np\ufunc\tbbpool.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\np\ufunc\workqueue.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numba\np\ufunc\_internal.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\fft\_pocketfft_umath.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\linalg\_umath_linalg.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\bit_generator.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\mtrand.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_bounded_integers.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_common.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_generator.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_mt19937.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_pcg64.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_philox.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\random\_sfc64.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\_core\_multiarray_tests.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy\_core\_multiarray_umath.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\DELVEWHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\entry_points.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\fft\pocketfft\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\linalg\lapack_lite\LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\ma\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\distributions\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\mt19937\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\pcg64\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\philox\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\sfc64\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\random\src\splitmix64\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\include\numpy\libdivide\LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\src\common\pythoncapi-compat\COPYING
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\src\highway\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\src\multiarray\dragon4_LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\src\npysort\x86-simd-sort\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy-2.4.6.dist-info\licenses\numpy\_core\src\umath\svml\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy.libs\libscipy_openblas64_-63c857e738469261263c764a36be9436.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\numpy.libs\msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\Privacy.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\ThirdPartyNotices.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\capi\onnxruntime.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\capi\onnxruntime_providers_shared.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\capi\onnxruntime_pybind11_state.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\datasets\logreg_iris.onnx
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\datasets\mul_1.onnx
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\datasets\sigmoid.onnx
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\tools\mobile_helpers\coreml_supported_mlprogram_ops.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\tools\mobile_helpers\coreml_supported_neuralnetwork_ops.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\onnxruntime\tools\mobile_helpers\nnapi_supported_ops.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_avif.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_imaging.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_imagingcms.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_imagingft.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_imagingmath.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_imagingtk.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\PIL\_webp.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\REQUESTED
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic-2.13.3.dist-info\licenses\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pydantic_core\_pydantic_core.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\top_level.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\pymatting-1.1.15.dist-info\licenses\LICENSE.md
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\entry_points.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\REQUESTED
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rembg-2.0.75.dist-info\licenses\LICENSE.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\rpds\rpds.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_cyutility.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\cluster\_hierarchy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\cluster\_optimal_leaf_ordering.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\cluster\_vq.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\fft\_pocketfft\pypocketfft.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\fftpack\convolve.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\integrate\_dop.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\integrate\_odepack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\integrate\_quadpack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\integrate\_test_multivariate.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\integrate\_vode.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_dfitpack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_dierckx.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_fitpack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_interpnd.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_ppoly.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_rbfinterp_pythran.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\interpolate\_rgi_cython.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\io\matlab\_mio5_utils.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\io\matlab\_mio_utils.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\io\matlab\_streams.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\io\_fast_matrix_market\_fmm_core.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\cython_blas.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\cython_lapack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_batched_linalg.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_cythonized_array_utils.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_decomp_interpolative.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_decomp_lu_cython.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_decomp_update.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_fblas.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_flapack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_linalg_pythran.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_matfuncs_expm.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_matfuncs_schur_sqrtm.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_matfuncs_sqrtm_triu.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\linalg\_solve_toeplitz.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\ndimage\_ctest.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\ndimage\_cytest.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\ndimage\_nd_image.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\ndimage\_ni_label.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\ndimage\_rank_filter_1d.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\odr\__odrpack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_bglu_dense.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_direct.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_group_columns.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_lbfgsb.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_lsap.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_minpack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_moduleTNC.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_pava_pybind.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_slsqplib.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_zeros.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\cython_optimize\_zeros.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_highspy\_core.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_highspy\_highs_options.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_lsq\givens_elimination.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\optimize\_trlib\_trlib.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_max_len_seq_inner.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_peak_finding_utils.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_sigtools.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_sosfilt.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_spline.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\signal\_upfirdn_apply.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\_csparsetools.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\_sparsetools.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_flow.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_matching.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_min_spanning_tree.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_reordering.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_shortest_path.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_tools.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\csgraph\_traversal.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\linalg\_propack.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\linalg\_dsolve\_superlu.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\sparse\linalg\_eigen\arpack\_arpacklib.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_ckdtree.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_distance_pybind.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_distance_wrap.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_hausdorff.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_qhull.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\_voronoi.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\transform\_rigid_transform_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\spatial\transform\_rotation_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\cython_special.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_comb.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_ellip_harm_2.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_gufuncs.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_specfun.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_special_ufuncs.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_test_internal.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_ufuncs.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\special\_ufuncs_cxx.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_ansari_swilk_statistics.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_biasedurn.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_qmc_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_qmvnt_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_sobol.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_stats.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_stats_pythran.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_levy_stable\levyst.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_rcont\rcont.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\stats\_unuran\unuran_wrapper.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\messagestream.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_ccallback_c.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_fpumode.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_test_ccallback.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_test_deprecation_call.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_test_deprecation_def.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy\_lib\_uarray\_uarray.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\scipy.libs\libscipy_openblas-64eda39e79589aedb16f58e5547eb599.dll
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\color\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\draw\_draw.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\draw\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\exposure\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\brief_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\censure_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\corner_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\orb_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\orb_descriptor_positions.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_canny_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_cascade.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_haar.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_hessian_det_appx.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_hoghistogram.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_sift.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\_texture.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\feature\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\_multiotsu.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\rank\bilateral_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\rank\core_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\rank\core_cy_3d.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\rank\generic_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\filters\rank\percentile_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\_ccomp.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\_find_contours_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\_marching_cubes_lewiner_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\_moments_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\_pnpoly.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\measure\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\metrics\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\ball_decompositions.npy
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\disk_decompositions.npy
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_convex_hull.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_extrema_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_flood_fill_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_grayreconstruct.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_max_tree.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_misc_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_skeletonize_lee_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\morphology\_skeletonize_various_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_denoise_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_inpaint.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_nl_means_denoising.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_rolling_ball_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_unwrap_1d.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_unwrap_2d.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\_unwrap_3d.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\restoration\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\segmentation\_felzenszwalb_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\segmentation\_quickshift_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\segmentation\_slic.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\segmentation\_watershed_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\segmentation\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\transform\_hough_transform.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\transform\_radon_transform.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\transform\_warps_cy.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\transform\__init__.pyi
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\util\_remap.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\_shared\geometry.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\skimage\_shared\transform.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\entry_points.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\top_level.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\tqdm-4.67.3.dist-info\licenses\LICENCE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\watchfiles\_rust_notify.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets\speedups.cp314-win_amd64.pyd
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\entry_points.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\INSTALLER
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\METADATA
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\RECORD
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\top_level.txt
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\WHEEL
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\websockets-16.0.dist-info\licenses\LICENSE
+   Compressing: e:\Coding\image-processor\build\.\dist\ImageBatchProcessor\_internal\yaml\_yaml.cp314-win_amd64.pyd
+   Compressing Setup program executable
+   Updating version info (Setup.exe)
+   Updating manifest (Setup.exe)
+
+Warning: The [Setup] section directive "PrivilegesRequired" is set to "admin" but per-user areas (localappdata) are used by the script. Regardless of the version of Windows, if the installation is running in administrative install mode then you should be careful about making any per-user area changes: such changes may not achieve what you are intending. See the "UsedUserAreasWarning" topic in help file for more information.
+
+Successful compile (68.141 sec). Resulting Setup program filename is:
+e:\Coding\image-processor\build\dist\ImageBatchProcessor_Setup_v0.0.2.exe

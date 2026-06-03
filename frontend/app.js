@@ -1141,7 +1141,7 @@ function updateResultCard(result, itemPct) {
                 <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
                 <button class="btn btn-outline btn-sm" onclick="openReprocess('${result.run_id}', '${result.id}', '${featuresStr}')">继续处理</button>
                 <!-- [HIDDEN: 盲水印提取功能暂屏蔽] <button class="btn btn-outline btn-sm" onclick="extractWatermarkFromResult('${result.run_id}', '${result.id}')">提取水印</button> -->
-                <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
             </div>
         `;
         applyPagination();
@@ -1157,7 +1157,7 @@ function updateResultCard(result, itemPct) {
             </div>
             <div class="actions">
                 <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
             </div>
         `;
     }

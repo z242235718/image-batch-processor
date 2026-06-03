@@ -2,10 +2,13 @@
 # Copyright (C) 2026 w2422. All rights reserved.
 
 import asyncio
+import ctypes
+import gc
 import io
 import json
 import os
 import shutil
+import sys
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -20,7 +23,7 @@ from PIL import Image, ImageOps
 
 from config import (
     INPUT_DIR, OUTPUT_DIR, TEMP_DIR, ASSETS_DIR, FRONTEND_DIR,
-    CONCURRENT_PROCESS_LIMIT, SESSION_CLEANUP_INTERVAL,
+    CONCURRENT_PROCESS_LIMIT, CONCURRENT_BG_LIMIT, SESSION_CLEANUP_INTERVAL,
 )
 from backend.models import ProcessResult, TaskStatus
 from backend.task_manager import task_manager
@@ -28,10 +31,46 @@ from backend.file_manager import save_uploaded_file, delete_result_files, get_ou
 from backend.utils.image_utils import generate_thumbnail
 from backend.session_manager import generate_session_id, touch_session, cleanup_expired_sessions, COOKIE_NAME, get_expired_sessions, delete_session_directories, remove_session_index
 from backend.processors.bg_remover import remove_background, register_batch, unregister_batch
+
+# ─── 运行时配置持久化 ───
+# 打包后 config.py 位于只读目录，API Key 等运行时配置改为写入 JSON 文件
+# 开发模式下也使用此机制，行为一致
+
+_RUNTIME_CONFIG_PATH: Optional[Path] = None
+
+
+def _get_runtime_config_path() -> Path:
+    global _RUNTIME_CONFIG_PATH
+    if _RUNTIME_CONFIG_PATH is None:
+        from config import DATA_DIR
+        _RUNTIME_CONFIG_PATH = DATA_DIR / "runtime_config.json"
+    return _RUNTIME_CONFIG_PATH
+
+
+def _save_runtime_config(key: str, value: any) -> None:
+    """将运行时配置保存到可写位置（%%LOCALAPPDATA%%\\ImageProcessor\\runtime_config.json）"""
+    path = _get_runtime_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        data[key] = value
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass  # 非关键功能，静默失败
+
+
+def _load_runtime_config(key: str, default: any = None) -> any:
+    """从持久化存储读取运行时配置"""
+    path = _get_runtime_config_path()
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8")).get(key, default)
+    except Exception:
+        pass
+    return default
 from backend.processors.logo_adder import add_logo
 from backend.processors.watermark import (
     add_text_watermark,
-    add_blind_watermark,
     extract_blind_watermark,
 )
 from backend.utils.perceptual_hash import compute_phash, hamming_distance
@@ -67,6 +106,28 @@ def _compute_features_str(
     if compress_enabled:
         parts.append("compress")
     return ",".join(parts)
+
+
+# ─── Windows 堆紧缩 ───
+# gc.collect() 释放 Python 对象后，numpy/ONNX 的 C 缓冲区被 free() 但
+# Windows C 运行时（ucrtbase）不将空闲页归还给 OS，导致内存基线居高不下。
+# HeapCompact 强制合并空闲块并将空页归还给 OS。
+
+_WIN32 = sys.platform == "win32"
+if _WIN32:
+    _GetProcessHeap = ctypes.windll.kernel32.GetProcessHeap
+    _GetProcessHeap.restype = ctypes.c_void_p
+
+    _HeapCompact = ctypes.windll.kernel32.HeapCompact
+    _HeapCompact.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    _HeapCompact.restype = ctypes.c_size_t
+
+
+def _compact_heap():
+    """Windows 堆紧缩：将 C 堆中已 free() 的页面归还给 OS"""
+    if _WIN32:
+        for _ in range(3):
+            _HeapCompact(_GetProcessHeap(), 0)
 
 
 app = FastAPI(title="图片批量处理工具")
@@ -445,7 +506,12 @@ async def process_images(
 
 
 async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo_img, mask_bytes: Optional[bytes] = None, session_id: str = ""):
-    semaphore = asyncio.Semaphore(CONCURRENT_PROCESS_LIMIT)
+    # 启用抠图时，外层信号量设为 1（串行处理），避免多张全分辨率图同时驻留内存。
+    # ONNX 推理本身已通过 bg_semaphore=1 串行化，降低并发对吞吐量无影响。
+    effective_limit = 1 if config.get("bg_method", "none") != "none" else CONCURRENT_PROCESS_LIMIT
+    semaphore = asyncio.Semaphore(effective_limit)
+    # 背景移除（ONNX推理）使用独立信号量，避免多张图同时推理导致OOM
+    bg_semaphore = asyncio.Semaphore(CONCURRENT_BG_LIMIT)
 
     async def process_one(image_id: str):
         async with semaphore:
@@ -462,28 +528,36 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                 img = await asyncio.to_thread(Image.open, meta["path"])
                 img = await asyncio.to_thread(ImageOps.exif_transpose, img)
 
-                # 1. 抠图
+                # 1. 抠图（使用独立信号量，并发数 = CONCURRENT_BG_LIMIT）
                 if config["bg_method"] != "none":
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    # 根据设置控制 ONNX 内存预分配
-                    os.environ["ORT_DISABLE_CPU_MEM_ARENA"] = "1" if config["bg_disable_arena"] else "0"
-                    img = await asyncio.to_thread(
-                        remove_background, img, config["bg_method"], config["api_key"],
-                        config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
-                    )
-                    # 始终存一份 PNG 抠图结果（含透明通道），供编辑器使用
-                    cutout_path = TEMP_DIR / session_id / f"{image_id}_cutout.png"
-                    cutout_path.parent.mkdir(parents=True, exist_ok=True)
-                    await asyncio.to_thread(img.save, str(cutout_path), "PNG")
+                    async with bg_semaphore:
+                        # 再次检查取消（等待信号量期间可能已被取消）
+                        if task_manager.is_cancelled(batch_id):
+                            result.status = "error"; result.error_msg = "已取消"
+                            await task_manager.update_result(batch_id, result); return
+                        # 根据设置控制 ONNX 内存预分配
+                        os.environ["ORT_DISABLE_CPU_MEM_ARENA"] = "1" if config["bg_disable_arena"] else "0"
+                        img = await asyncio.to_thread(
+                            remove_background, img, config["bg_method"], config["api_key"],
+                            config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
+                        )
+                        # 始终存一份 PNG 抠图结果（含透明通道），供编辑器使用
+                        cutout_path = TEMP_DIR / session_id / f"{image_id}_cutout.png"
+                        cutout_path.parent.mkdir(parents=True, exist_ok=True)
+                        await asyncio.to_thread(img.save, str(cutout_path), "PNG")
+                    # 抠图完成，回收 ONNX 中间张量内存并归还堆页给 OS
+                    gc.collect()
+                    _compact_heap()
 
                 # 2. Logo (图片型)
                 if config["logo_enabled"] and logo_img:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    img = await asyncio.to_thread(
+                    new_img = await asyncio.to_thread(
                         add_logo, img, logo_img,
                         config["logo_position"],
                         config["logo_ratio"],
@@ -491,13 +565,14 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         margin=config["logo_margin"],
                         tile=config["logo_tile"],
                     )
+                    del img; img = new_img
 
                 # 3. 显式水印
                 if config["wm_mode"] in ("position", "tile", "dense") and config["wm_text"]:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    img = await asyncio.to_thread(
+                    new_img = await asyncio.to_thread(
                         add_text_watermark, img,
                         config["wm_text"],
                         config["wm_position"],
@@ -509,16 +584,9 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         config["wm_mode"] == "dense",
                         config["wm_dense_density"],
                     )
+                    del img; img = new_img
 
-                # 4. 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-                if config["wm_blind_enabled"] and config["wm_blind_text"]:
-                    img = await asyncio.to_thread(
-                        add_blind_watermark, img, config["wm_blind_text"],
-                        config.get("wm_blind_strength", 16),
-                        config.get("wm_blind_use_mask", True),
-                    )
-
-                # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+                # 4. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
                 if mask_bytes:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
@@ -607,6 +675,8 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                     pass  # 元数据非关键，不阻塞主流程
 
                 del img, out_img
+                gc.collect()
+                _compact_heap()
 
             except Exception as e:
                 result.status = "error"
@@ -910,11 +980,7 @@ async def reprocess_image(
             wm_tile_direction, wm_mode == "dense", wm_dense_density,
         )
 
-    # 4. 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-    if wm_blind_enabled and wm_blind_text:
-        img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
-    # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+    # 4. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
     if mask_bytes:
         img = apply_mask_crop(img, mask_bytes)
         # 保存蒙版供「再次编辑」预填
@@ -1078,10 +1144,6 @@ async def edit_mask(
                 wm_tile_direction, wm_mode == "dense", wm_dense_density,
             )
 
-        # 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-        if wm_blind_enabled and wm_blind_text:
-            result_img = add_blind_watermark(result_img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
         # 压缩
         if compress_enabled:
             data = compress_image(
@@ -1240,10 +1302,6 @@ async def edit_cutout(
                 wm_tile_direction, wm_mode == "dense", wm_dense_density,
             )
 
-        # 盲水印
-        if wm_blind_enabled and wm_blind_text:
-            img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
         # 压缩
         if compress_enabled:
             data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
@@ -1358,26 +1416,15 @@ async def update_settings(
 async def get_apikey():
     """获取当前保存的 API Key"""
     from config import REMBG_API_KEY
-    return {"api_key": REMBG_API_KEY if hasattr(__import__('config'), 'REMBG_API_KEY') else ""}
+    # 优先返回持久化的运行时配置，否则使用代码里的默认值
+    saved = _load_runtime_config("api_key")
+    return {"api_key": saved if saved else REMBG_API_KEY}
 
 
 @app.post("/api/config/apikey")
 async def update_apikey(api_key: str = Form(...)):
-    """更新 API Key 到配置文件"""
-    config_path = Path(__file__).resolve().parent.parent / "config.py"
-    content = config_path.read_text(encoding="utf-8")
-    lines = content.split('\n')
-    key_line_found = False
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith('REMBG_API_KEY'):
-            new_lines.append(f'REMBG_API_KEY = "{api_key}"')
-            key_line_found = True
-        else:
-            new_lines.append(line)
-    if not key_line_found:
-        new_lines.append(f'\nREMBG_API_KEY = "{api_key}"')
-    config_path.write_text('\n'.join(new_lines), encoding="utf-8")
+    """更新 API Key（保存到可写位置）"""
+    _save_runtime_config("api_key", api_key)
     return {"ok": True, "api_key": api_key}
 
 
@@ -1385,8 +1432,11 @@ async def update_apikey(api_key: str = Form(...)):
 
 @app.get("/api/config/default-logo")
 async def get_default_logo_config():
-    """获取默认 Logo 配置"""
+    """获取默认 Logo 配置（优先返回用户保存的运行时配置）"""
     from config import DEFAULT_LOGO_POSITION, DEFAULT_LOGO_RATIO, DEFAULT_LOGO_OPACITY, DEFAULT_LOGO_MARGIN
+    saved = _load_runtime_config("default_logo")
+    if saved:
+        return saved
     return {
         "position": DEFAULT_LOGO_POSITION,
         "ratio": DEFAULT_LOGO_RATIO,
@@ -1402,23 +1452,13 @@ async def update_default_logo_config(
     opacity: float = Form(0.8),
     margin: int = Form(20),
 ):
-    """更新默认 Logo 配置到配置文件"""
-    config_path = Path(__file__).resolve().parent.parent / "config.py"
-    content = config_path.read_text(encoding="utf-8")
-    lines = content.split('\n')
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith('DEFAULT_LOGO_POSITION'):
-            new_lines.append(f'DEFAULT_LOGO_POSITION = "{position}"')
-        elif line.strip().startswith('DEFAULT_LOGO_RATIO'):
-            new_lines.append(f'DEFAULT_LOGO_RATIO = {ratio}')
-        elif line.strip().startswith('DEFAULT_LOGO_OPACITY'):
-            new_lines.append(f'DEFAULT_LOGO_OPACITY = {opacity}')
-        elif line.strip().startswith('DEFAULT_LOGO_MARGIN'):
-            new_lines.append(f'DEFAULT_LOGO_MARGIN = {margin}')
-        else:
-            new_lines.append(line)
-    config_path.write_text('\n'.join(new_lines), encoding="utf-8")
+    """更新默认 Logo 配置（保存到可写位置）"""
+    _save_runtime_config("default_logo", {
+        "position": position,
+        "ratio": ratio,
+        "opacity": opacity,
+        "margin": margin,
+    })
     return {"ok": True, "position": position, "ratio": ratio, "opacity": opacity, "margin": margin}
 
 
