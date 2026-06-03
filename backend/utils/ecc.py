@@ -1,3 +1,6 @@
+# Author: w2422 <z242235718@163.com>
+# Copyright (C) 2026 w2422. All rights reserved.
+
 """
 Reed-Solomon 纠错编码模块
 用于盲水印的 ECC（前向纠错），增强抗 JPEG 压缩和噪声的鲁棒性

@@ -1,3 +1,6 @@
+# Author: w2422 <z242235718@163.com>
+# Copyright (C) 2026 w2422. All rights reserved.
+
 from pathlib import Path
 from config import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE_MB, FILE_SIGNATURES
 

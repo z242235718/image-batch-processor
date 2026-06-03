@@ -1,3 +1,6 @@
+# Author: w2422 <z242235718@163.com>
+# Copyright (C) 2026 w2422. All rights reserved.
+
 """
 感知哈希（pHash）模块
 基于 DCT 的感知哈希，用于图像相似度匹配。
