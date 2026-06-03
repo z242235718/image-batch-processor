@@ -2392,8 +2392,8 @@ function openSettings() {
     // 当前CPU线程数
     const cores = navigator.hardwareConcurrency || '未知';
     document.getElementById('currentCpuCores').textContent = `当前CPU线程数: ${cores}`;
-    const recommended = Math.max(1, (navigator.hardwareConcurrency || 4) - 2);
-    document.getElementById('recommendedThreads').textContent = `推荐数量：${recommended}（逻辑线程数 - 2）`;
+    const recommended = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+    document.getElementById('recommendedThreads').textContent = `推荐数量：${recommended}（核心数 - 1）`;
     // 加载默认 Logo 配置
     document.getElementById('settingLogoPosition').value = defaultLogoConfig.position;
     document.getElementById('settingLogoRatio').value = Math.round(defaultLogoConfig.ratio * 100);
