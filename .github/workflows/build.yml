@@ -1,0 +1,194 @@
+# ============================================
+#   图片批量处理工具 - 多平台自动打包工作流
+# ============================================
+# 触发方式：
+#   1. 创建 Git Tag (格式: v*) 时自动构建
+#   2. 手动触发 (GitHub Actions 页面 → Run workflow)
+#
+# 构建产物：
+#   - Windows: ImageBatchProcessor-windows-x86_64.zip
+#   - macOS:   ImageBatchProcessor-macos-arm64.dmg (Apple Silicon)
+#              ImageBatchProcessor-macos-x86_64.dmg (Intel)
+#   - Linux:   ImageBatchProcessor-linux-x86_64.tar.gz
+#
+# 使用说明：
+#   1. 推送到 GitHub 仓库
+#   2. 创建 Tag: git tag v1.0.0 && git push origin v1.0.0
+#   3. 在 Actions 页面下载构建产物
+
+name: Build & Package
+
+on:
+  workflow_dispatch:          # 手动触发
+  push:
+    tags:
+      - 'v*'                  # Tag 触发: v1.0.0, v1.0.1 等
+
+env:
+  PYTHON_VERSION: '3.12'     # 使用 Python 3.12 获得最广兼容性
+
+jobs:
+  # ============================================
+  # Windows 构建
+  # ============================================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 构建可执行文件
+        run: |
+          pyinstaller --workpath "build\pyinstaller-work" --distpath "build\dist" "build\image_processor.spec"
+
+      - name: 打包为 ZIP
+        run: |
+          cd build\dist
+          powershell Compress-Archive -Path ImageBatchProcessor -DestinationPath ImageBatchProcessor-windows-x86_64.zip
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageBatchProcessor-windows-x86_64
+          path: build/dist/ImageBatchProcessor-windows-x86_64.zip
+
+  # ============================================
+  # macOS 构建 (Apple Silicon + Intel)
+  # ============================================
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest      # GitHub Actions 最新 = ARM64
+            arch: arm64
+            target: arm64
+          - os: macos-13          # macos-13 是 Intel x86_64
+            arch: x86_64
+            target: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 构建可执行文件
+        run: |
+          pyinstaller --workpath "build/pyinstaller-work" --distpath "build/dist" "build/image_processor_mac.spec"
+
+      - name: 打包为 tar.gz
+        run: |
+          cd build/dist
+          tar czf ImageBatchProcessor-macos-${{ matrix.arch }}.tar.gz ImageBatchProcessor/
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageBatchProcessor-macos-${{ matrix.arch }}
+          path: build/dist/ImageBatchProcessor-macos-${{ matrix.arch }}.tar.gz
+
+  # ============================================
+  # Linux 构建
+  # ============================================
+  build-linux:
+    runs-on: ubuntu-20.04    # 使用较老的 glibc 以获得更广兼容性
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0  # OpenCV 等需要
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 构建可执行文件
+        run: |
+          pyinstaller --workpath "build/pyinstaller-work" --distpath "build/dist" "build/image_processor_linux.spec"
+
+      - name: 打包为 tar.gz
+        run: |
+          cd build/dist
+          tar czf ImageBatchProcessor-linux-x86_64.tar.gz ImageBatchProcessor/
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageBatchProcessor-linux-x86_64
+          path: build/dist/ImageBatchProcessor-linux-x86_64.tar.gz
+
+  # ============================================
+  # 发布 Release (仅 Tag 触发)
+  # ============================================
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: 创建 Release 并上传
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## 🖼️ 图片批量处理工具 ${{ github.ref_name }}
+
+            ### 下载说明
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 | `ImageBatchProcessor-windows-x86_64.zip` |
+            | macOS | Apple Silicon (M1~M4) | `ImageBatchProcessor-macos-arm64.tar.gz` |
+            | macOS | Intel | `ImageBatchProcessor-macos-x86_64.tar.gz` |
+            | Linux | x86_64 | `ImageBatchProcessor-linux-x86_64.tar.gz` |
+
+            ### 使用方法
+            1. 下载对应平台的压缩包
+            2. 解压后运行 `ImageBatchProcessor` (或 `ImageBatchProcessor.exe`)
+            3. 浏览器自动打开 http://127.0.0.1:8000
+            4. 首次使用背景移除功能会自动下载模型 (~1GB)
+
+            ### ⚠️ 注意事项
+            - macOS: 首次运行需要右键 → 打开（绕过 Gatekeeper）
+            - Linux: 可能需要 `chmod +x ImageBatchProcessor`
+            - 首次使用 `背景移除` 功能需要联网下载模型文件（~1 GB）, 请耐心等待
+            - 下载模型文件后，后续所有处理均在本地完成，无需联网
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false

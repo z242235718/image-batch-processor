@@ -49,17 +49,17 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-:: 验证构建输出（onedir 模式输出在 build\dist\ImageProcessor\ 目录）
+:: 验证构建输出（onedir 模式输出在 build\dist\ImageBatchProcessor\ 目录）
 echo.
 echo [信息] 验证构建输出...
-if exist "build\dist\ImageProcessor\ImageProcessor.exe" (
+if exist "build\dist\ImageBatchProcessor\ImageBatchProcessor.exe" (
     echo [成功] 构建完成！
     echo.
-    echo   可执行文件: build\dist\ImageProcessor\ImageProcessor.exe
-    for /f "tokens=*" %%a in ('dir /s /a "build\dist\ImageProcessor" 2^>nul ^| findstr "File(s)"') do echo   打包大小: %%a
+    echo   可执行文件: build\dist\ImageBatchProcessor\ImageBatchProcessor.exe
+    for /f "tokens=*" %%a in ('dir /s /a "build\dist\ImageBatchProcessor" 2^>nul ^| findstr "File(s)"') do echo   打包大小: %%a
     echo.
     echo   直接运行测试：
-    echo     build\dist\ImageProcessor\ImageProcessor.exe
+    echo     build\dist\ImageBatchProcessor\ImageBatchProcessor.exe
     echo.
     echo   如果需要创建安装程序，请安装 Inno Setup 后运行：
     echo     iscc build\installer.iss
