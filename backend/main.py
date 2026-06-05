@@ -2,10 +2,13 @@
 # Copyright (C) 2026 w2422. All rights reserved.
 
 import asyncio
+import ctypes
+import gc
 import io
 import json
 import os
 import shutil
+import sys
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -20,18 +23,65 @@ from PIL import Image, ImageOps
 
 from config import (
     INPUT_DIR, OUTPUT_DIR, TEMP_DIR, ASSETS_DIR, FRONTEND_DIR,
-    CONCURRENT_PROCESS_LIMIT, SESSION_CLEANUP_INTERVAL,
+    CONCURRENT_PROCESS_LIMIT, CONCURRENT_BG_LIMIT, SESSION_CLEANUP_INTERVAL,
 )
 from backend.models import ProcessResult, TaskStatus
 from backend.task_manager import task_manager
-from backend.file_manager import save_uploaded_file, delete_result_files, get_output_path, cleanup_old_files, periodic_cleanup
+from backend.file_manager import (
+    save_uploaded_file,
+    delete_result_files,
+    get_output_path,
+    cleanup_old_files,
+    periodic_cleanup,
+    get_cutout_path,
+    get_alpha_path,
+    get_probe_alpha_path,
+    get_result_meta_path,
+    get_result_thumb_path,
+)
 from backend.utils.image_utils import generate_thumbnail
 from backend.session_manager import generate_session_id, touch_session, cleanup_expired_sessions, COOKIE_NAME, get_expired_sessions, delete_session_directories, remove_session_index
-from backend.processors.bg_remover import remove_background, register_batch, unregister_batch
+from backend.processors.bg_remover import remove_background, remove_bg_local_alpha, remove_bg_local_alpha_from_path, remove_bg_local_probe_alpha_from_path, register_batch, unregister_batch, release_cached_session
+
+# ─── 运行时配置持久化 ───
+# 打包后 config.py 位于只读目录，API Key 等运行时配置改为写入 JSON 文件
+# 开发模式下也使用此机制，行为一致
+
+_RUNTIME_CONFIG_PATH: Optional[Path] = None
+
+
+def _get_runtime_config_path() -> Path:
+    global _RUNTIME_CONFIG_PATH
+    if _RUNTIME_CONFIG_PATH is None:
+        from config import DATA_DIR
+        _RUNTIME_CONFIG_PATH = DATA_DIR / "runtime_config.json"
+    return _RUNTIME_CONFIG_PATH
+
+
+def _save_runtime_config(key: str, value: any) -> None:
+    """将运行时配置保存到可写位置（%%LOCALAPPDATA%%\\ImageProcessor\\runtime_config.json）"""
+    path = _get_runtime_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        data[key] = value
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass  # 非关键功能，静默失败
+
+
+def _load_runtime_config(key: str, default: any = None) -> any:
+    """从持久化存储读取运行时配置"""
+    path = _get_runtime_config_path()
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8")).get(key, default)
+    except Exception:
+        pass
+    return default
 from backend.processors.logo_adder import add_logo
 from backend.processors.watermark import (
     add_text_watermark,
-    add_blind_watermark,
     extract_blind_watermark,
 )
 from backend.utils.perceptual_hash import compute_phash, hamming_distance
@@ -44,6 +94,358 @@ def _save_png_lossless(image: Image.Image) -> bytes:
     buf = io.BytesIO()
     image.save(buf, format="PNG", optimize=True, compress_level=9)
     return buf.getvalue()
+
+
+def _find_original_path(session_id: str, image_id: str) -> Optional[Path]:
+    """按 image_id 查找原始上传文件路径（兼容内存记录丢失后的回退）。"""
+    meta = image_store.get(session_id, {}).get(image_id)
+    if meta and os.path.exists(meta["path"]):
+        return Path(meta["path"])
+
+    session_input = INPUT_DIR / session_id
+    for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif']:
+        path = session_input / f"{image_id}{ext}"
+        if path.exists():
+            return path
+    return None
+
+
+def _compose_rgba_from_source_and_alpha(source_path: Path, alpha_path: Path) -> Image.Image:
+    """从原图 + alpha 蒙版合成 RGBA cutout。"""
+    with Image.open(source_path) as src_img:
+        src_img.load()
+        base_img = ImageOps.exif_transpose(src_img)
+    if base_img.mode != "RGBA":
+        base_img = base_img.convert("RGBA")
+
+    with Image.open(alpha_path) as alpha_img:
+        alpha_img.load()
+        alpha = alpha_img.convert("L")
+
+    try:
+        if alpha.size != base_img.size:
+            resized_alpha = alpha.resize(base_img.size, Image.LANCZOS)
+            try:
+                base_img.putalpha(resized_alpha)
+            finally:
+                try:
+                    resized_alpha.close()
+                except Exception:
+                    pass
+        else:
+            base_img.putalpha(alpha)
+    finally:
+        try:
+            alpha.close()
+        except Exception:
+            pass
+
+    return base_img
+
+
+def _build_alpha_thumbnail_from_source_and_alpha(source_path: Path, alpha_path: Path, size: int = 200) -> bytes:
+    """仅为缩略图生成小尺寸 RGBA 预览，避免先重建整张全分辨率 cutout。"""
+    with Image.open(source_path) as src_img:
+        try:
+            src_img.draft("RGB", (size, size))
+        except Exception:
+            pass
+        src_img.thumbnail((size, size), Image.LANCZOS)
+        target = ImageOps.exif_transpose(src_img)
+        target.load()
+
+    try:
+        if target.mode != "RGBA":
+            small_img = target.convert("RGBA")
+        else:
+            small_img = target
+        try:
+            with Image.open(alpha_path) as alpha_img:
+                alpha_img.thumbnail((size, size), Image.LANCZOS)
+                alpha = alpha_img.convert("L")
+            try:
+                if alpha.size != small_img.size:
+                    resized_alpha = alpha.resize(small_img.size, Image.LANCZOS)
+                    try:
+                        small_img.putalpha(resized_alpha)
+                    finally:
+                        try:
+                            resized_alpha.close()
+                        except Exception:
+                            pass
+                else:
+                    small_img.putalpha(alpha)
+                return generate_thumbnail(small_img, size=size, copy_image=False)
+            finally:
+                try:
+                    alpha.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                small_img.close()
+            except Exception:
+                pass
+    finally:
+        if target.mode == "RGBA":
+            try:
+                target.close()
+            except Exception:
+                pass
+
+
+def _load_result_meta(session_id: str, image_id: str, run_id: str) -> Optional[dict]:
+    """读取结果元数据。"""
+    meta_path = get_result_meta_path(image_id, run_id=run_id, session_id=session_id)
+    if not meta_path.exists():
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as mf:
+            return json.load(mf)
+    except Exception:
+        return None
+
+
+def _save_result_meta(session_id: str, image_id: str, run_id: str, payload: dict) -> None:
+    """统一写入结果元数据。"""
+    meta_path = get_result_meta_path(image_id, run_id=run_id, session_id=session_id)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(meta_path, "w", encoding="utf-8") as mf:
+        json.dump(payload, mf, ensure_ascii=False)
+
+
+def _find_latest_alpha_meta(session_id: str, image_id: str) -> Optional[dict]:
+    """查找当前图片最新的 alpha-only-v1 结果元数据。"""
+    session_temp = TEMP_DIR / session_id
+    if not session_temp.exists():
+        return None
+
+    latest = None
+    for f in session_temp.iterdir():
+        if not f.name.startswith(f"{image_id}_") or not f.name.endswith("_meta.json"):
+            continue
+        try:
+            with open(f, encoding="utf-8") as mf:
+                data = json.load(mf)
+        except Exception:
+            continue
+        if data.get("id") != image_id:
+            continue
+        if data.get("protocol_version") != "alpha-only-v1":
+            continue
+        if latest is None or data.get("finished_at", "") > latest.get("finished_at", ""):
+            latest = data
+    return latest
+
+
+def _get_alpha_path_from_meta(session_id: str, meta: Optional[dict], image_id: str) -> Optional[Path]:
+    """从结果元数据或默认别名解析全尺寸 alpha 文件路径。"""
+    if meta:
+        alpha_rel = meta.get("alpha_url", "")
+        if alpha_rel.startswith("/api/alpha/"):
+            alpha_path = get_alpha_path(image_id, run_id=meta.get("run_id", ""), session_id=session_id)
+            if alpha_path.exists():
+                return alpha_path
+        if meta.get("alpha_storage") == "probe":
+            return None
+    alpha_path = get_alpha_path(image_id, session_id=session_id)
+    if alpha_path.exists():
+        return alpha_path
+    return None
+
+
+def _get_probe_alpha_path_from_meta(session_id: str, meta: Optional[dict], image_id: str) -> Optional[Path]:
+    """从结果元数据或默认别名解析 probe alpha 小图路径。"""
+    if meta:
+        run_id = meta.get("run_id", "")
+        probe_path = get_probe_alpha_path(image_id, run_id=run_id, session_id=session_id)
+        if probe_path.exists():
+            return probe_path
+    probe_path = get_probe_alpha_path(image_id, session_id=session_id)
+    if probe_path.exists():
+        return probe_path
+    return None
+
+
+def _materialize_alpha_asset(session_id: str, meta: dict, image_id: str) -> Path:
+    """按需将 probe alpha 放大为全尺寸 alpha 资产，供兼容接口/编辑器使用。"""
+    alpha_path = get_alpha_path(image_id, run_id=meta.get("run_id", ""), session_id=session_id)
+    if alpha_path.exists():
+        return alpha_path
+    probe_path = _get_probe_alpha_path_from_meta(session_id, meta, image_id)
+    if probe_path is None:
+        raise FileNotFoundError("probe alpha 资产不存在")
+
+    source_width = int(meta.get("source_width") or 0)
+    source_height = int(meta.get("source_height") or 0)
+    if source_width <= 0 or source_height <= 0:
+        source_path = _find_original_path(session_id, meta.get("source_image_id", image_id))
+        if not source_path:
+            raise FileNotFoundError("原图不存在")
+        with Image.open(source_path) as src_img:
+            source_width, source_height = ImageOps.exif_transpose(src_img).size
+
+    with Image.open(probe_path) as probe_img:
+        probe_alpha = probe_img.convert("L")
+    try:
+        if probe_alpha.size != (source_width, source_height):
+            alpha_full = probe_alpha.resize((source_width, source_height), Image.LANCZOS)
+        else:
+            alpha_full = probe_alpha
+        try:
+            alpha_path.parent.mkdir(parents=True, exist_ok=True)
+            alpha_full.save(alpha_path, "PNG")
+            return alpha_path
+        finally:
+            if alpha_full is not probe_alpha:
+                try:
+                    alpha_full.close()
+                except Exception:
+                    pass
+    finally:
+        try:
+            probe_alpha.close()
+        except Exception:
+            pass
+        gc.collect()
+        _compact_heap()
+
+
+def _build_result_meta(
+    image_id: str,
+    filename: str,
+    run_id: str,
+    features: str,
+    output_size: int,
+    finished_at: str,
+    *,
+    protocol_version: str = "legacy",
+    source_image_id: str = "",
+    result_kind: str = "materialized",
+    preview_url: str = "",
+    download_url: str = "",
+    alpha_url: str = "",
+    materialized: bool = True,
+    cutout_editable: bool = False,
+    has_alpha_source: bool = False,
+) -> dict:
+    """构造统一结果元数据。"""
+    download_url = download_url or f"/api/download/{run_id}/{image_id}"
+    preview_url = preview_url or f"/api/preview/{run_id}/{image_id}"
+    payload = {
+        "id": image_id,
+        "filename": filename,
+        "run_id": run_id,
+        "features": features,
+        "output_size": output_size,
+        "output_url": download_url,
+        "download_url": download_url,
+        "thumbnail_url": f"/api/result-thumbnail/{run_id}/{image_id}",
+        "preview_url": preview_url,
+        "finished_at": finished_at,
+        "protocol_version": protocol_version,
+        "source_image_id": source_image_id or image_id,
+        "result_kind": result_kind,
+        "alpha_url": alpha_url,
+        "materialized": materialized,
+        "cutout_editable": cutout_editable,
+        "has_alpha_source": has_alpha_source,
+    }
+    return payload
+
+
+def _materialize_result_bytes(session_id: str, meta: dict) -> tuple[bytes, str, str]:
+    """为 alpha-only 结果按需生成导出文件字节。"""
+    image_id = meta["id"]
+    run_id = meta.get("run_id", "")
+    source_path = _find_original_path(session_id, meta.get("source_image_id", image_id))
+    alpha_path = _get_alpha_path_from_meta(session_id, meta, image_id)
+    if alpha_path is None:
+        alpha_path = _get_probe_alpha_path_from_meta(session_id, meta, image_id)
+    if not source_path or not alpha_path:
+        raise FileNotFoundError("alpha-only 结果缺少原图或 alpha 资产")
+
+    with Image.open(alpha_path) as alpha_img:
+        alpha = alpha_img.convert("L")
+
+    try:
+        with Image.open(source_path) as src_img:
+            src_img.load()
+            base_img = ImageOps.exif_transpose(src_img)
+        try:
+            output_format = meta.get("render_output_format", "PNG")
+            quality = int(meta.get("render_quality", 95) or 95)
+            max_file_size_kb = int(meta.get("render_max_file_size_kb", 0) or 0)
+            max_width = int(meta.get("render_max_width", 0) or 0)
+            source_file_size = int(meta.get("source_file_size", 0) or 0)
+            prefer_target_jpeg_size = bool(meta.get("prefer_target_jpeg_size", False))
+            if base_img.mode != "RGBA":
+                rgba_img = base_img.convert("RGBA")
+                try:
+                    working_img = rgba_img
+                    if alpha.size != working_img.size:
+                        resized_alpha = alpha.resize(working_img.size, Image.LANCZOS)
+                    else:
+                        resized_alpha = alpha
+                    try:
+                        working_img.putalpha(resized_alpha)
+                        data = compress_image(
+                            working_img,
+                            output_format,
+                            quality,
+                            max_file_size_kb,
+                            max_width,
+                            source_file_size,
+                            prefer_target_jpeg_size,
+                        )
+                    finally:
+                        if resized_alpha is not alpha:
+                            try:
+                                resized_alpha.close()
+                            except Exception:
+                                pass
+                finally:
+                    try:
+                        rgba_img.close()
+                    except Exception:
+                        pass
+            else:
+                if alpha.size != base_img.size:
+                    resized_alpha = alpha.resize(base_img.size, Image.LANCZOS)
+                else:
+                    resized_alpha = alpha
+                try:
+                    base_img.putalpha(resized_alpha)
+                    data = compress_image(
+                        base_img,
+                        output_format,
+                        quality,
+                        max_file_size_kb,
+                        max_width,
+                        source_file_size,
+                        prefer_target_jpeg_size,
+                    )
+                finally:
+                    if resized_alpha is not alpha:
+                        try:
+                            resized_alpha.close()
+                        except Exception:
+                            pass
+        finally:
+            try:
+                base_img.close()
+            except Exception:
+                pass
+    finally:
+        try:
+            alpha.close()
+        except Exception:
+            pass
+
+    ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+    ext = ext_map.get(str(meta.get("render_output_format", "PNG")).upper(), ".png")
+    filename = Path(meta.get("filename") or f"{image_id}{ext}").stem + ext
+    return data, ext, filename
 
 
 def _compute_features_str(
@@ -69,6 +471,48 @@ def _compute_features_str(
     return ",".join(parts)
 
 
+# ─── Windows 堆紧缩 ───
+# gc.collect() 释放 Python 对象后，numpy/ONNX 的 C 缓冲区被 free() 但
+# Windows C 运行时（ucrtbase）不将空闲页归还给 OS，导致内存基线居高不下。
+# HeapCompact 强制合并空闲块并将空页归还给 OS。
+
+_WIN32 = sys.platform == "win32"
+if _WIN32:
+    _GetProcessHeap = ctypes.windll.kernel32.GetProcessHeap
+    _GetProcessHeap.restype = ctypes.c_void_p
+
+    _HeapCompact = ctypes.windll.kernel32.HeapCompact
+    _HeapCompact.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    _HeapCompact.restype = ctypes.c_size_t
+
+
+def _compact_heap():
+    """Windows 堆紧缩：将 C 堆中已 free() 的页面归还给 OS"""
+    if _WIN32:
+        for _ in range(3):
+            try:
+                _HeapCompact(_GetProcessHeap(), 0)
+            except Exception:
+                break
+
+
+def _prewarm_bg_model(method: str, api_key: str, model: str, threads: int, disable_arena: bool):
+    """预加载抠图模型 + 跑一次小推理，预热 ONNX 内部状态
+
+    隔离模型加载和首次推理的内存尖峰，使其发生在批处理开始之前。
+    local 模式预热 alpha-only 通路，避免首张图意外走 legacy cutout 合成链。
+    """
+    dummy = Image.new("RGBA", (64, 64), (0, 0, 0, 255))
+    if method == "local":
+        alpha = remove_bg_local_alpha(dummy, model, threads, disable_arena)
+        try:
+            alpha.close()
+        except Exception:
+            pass
+        return
+    remove_background(dummy, method, api_key, model, threads, disable_arena)
+
+
 app = FastAPI(title="图片批量处理工具")
 
 app.add_middleware(
@@ -81,6 +525,7 @@ app.add_middleware(
 # 内存存储（session_id -> image_id -> meta）
 image_store: Dict[str, Dict[str, dict]] = {}
 logo_store: Dict[str, Dict[str, dict]] = {}
+_active_worker_tasks = set()
 
 # ─── Session 中间件 ───
 
@@ -310,15 +755,73 @@ async def get_original(request: Request, image_id: str):
 async def get_cutout(request: Request, image_id: str):
     """获取抠图结果 PNG（含透明通道），供编辑器使用"""
     session_id = request.state.session_id
-    session_temp = TEMP_DIR / session_id
-    cutout_path = session_temp / f"{image_id}_cutout.png"
+    cutout_path = get_cutout_path(image_id, session_id=session_id)
     if cutout_path.exists():
         return FileResponse(cutout_path, media_type="image/png")
+
+    alpha_meta = _find_latest_alpha_meta(session_id, image_id)
+    alpha_path = _get_alpha_path_from_meta(session_id, alpha_meta, image_id)
+    if alpha_path is None:
+        alpha_path = _get_probe_alpha_path_from_meta(session_id, alpha_meta, image_id)
+    source_path = _find_original_path(session_id, image_id)
+    if alpha_path and source_path:
+        try:
+            with _compose_rgba_from_source_and_alpha(source_path, alpha_path) as cutout_img:
+                # 限制输出尺寸，加速编辑器加载（大图从 3000→1200px 以内）
+                w, h = cutout_img.size
+                MAX_CUTOUT_SIZE = 1200
+                if max(w, h) > MAX_CUTOUT_SIZE:
+                    cutout_img.thumbnail((MAX_CUTOUT_SIZE, MAX_CUTOUT_SIZE), Image.LANCZOS)
+                png_data = await asyncio.to_thread(_save_png_lossless, cutout_img)
+            return StreamingResponse(io.BytesIO(png_data), media_type="image/png")
+        except Exception:
+            pass
+
     # 没有抠图结果则回退到原图
-    meta = image_store.get(session_id, {}).get(image_id)
-    if meta and os.path.exists(meta["path"]):
-        return FileResponse(meta["path"])
+    if source_path and source_path.exists():
+        return FileResponse(source_path)
     raise HTTPException(status_code=404, detail="抠图结果不存在")
+
+
+@app.get("/api/alpha/{run_id}/{image_id}")
+async def get_alpha_asset(request: Request, run_id: str, image_id: str):
+    """获取 alpha-only 资产（单通道 PNG）"""
+    session_id = request.state.session_id
+    alpha_path = get_alpha_path(image_id, run_id=run_id, session_id=session_id)
+    if not alpha_path.exists():
+        alpha_path = get_alpha_path(image_id, session_id=session_id)
+    if alpha_path.exists():
+        return FileResponse(alpha_path, media_type="image/png")
+    meta = _load_result_meta(session_id, image_id, run_id)
+    if meta and meta.get("alpha_storage") == "probe":
+        try:
+            alpha_path = await asyncio.to_thread(_materialize_alpha_asset, session_id, meta, image_id)
+            return FileResponse(alpha_path, media_type="image/png")
+        except FileNotFoundError:
+            pass
+    raise HTTPException(status_code=404, detail="alpha 资产不存在")
+
+
+@app.get("/api/preview/{run_id}/{image_id}")
+async def get_result_preview(request: Request, run_id: str, image_id: str):
+    """获取结果预览图，alpha-only 结果按需从 source + alpha 合成。"""
+    session_id = request.state.session_id
+    meta = _load_result_meta(session_id, image_id, run_id)
+    if meta and meta.get("protocol_version") == "alpha-only-v1":
+        source_path = _find_original_path(session_id, meta.get("source_image_id", image_id))
+        alpha_path = _get_alpha_path_from_meta(session_id, meta, image_id)
+        if alpha_path is None:
+            alpha_path = _get_probe_alpha_path_from_meta(session_id, meta, image_id)
+        if source_path and alpha_path:
+            with _compose_rgba_from_source_and_alpha(source_path, alpha_path) as preview_img:
+                png_data = await asyncio.to_thread(_save_png_lossless, preview_img)
+            return StreamingResponse(io.BytesIO(png_data), media_type="image/png")
+
+    for ext in [".jpg", ".png", ".webp"]:
+        path = get_output_path(image_id, ext, run_id=run_id, session_id=session_id)
+        if path.exists():
+            return FileResponse(path)
+    raise HTTPException(status_code=404, detail="预览不存在")
 
 
 @app.get("/api/last-mask/{image_id}")
@@ -341,7 +844,7 @@ async def process_images(
     bg_model: str = Form("rmbg-1.4"),
     api_key: str = Form(""),
     bg_threads: int = Form(0),
-    bg_disable_arena: bool = Form(True),
+    bg_disable_arena: bool = Form(False),
     logo_enabled: bool = Form(False),
     logo_position: str = Form("right-bottom"),
     logo_ratio: float = Form(0.15),
@@ -369,6 +872,7 @@ async def process_images(
     mask: Optional[UploadFile] = File(None),
     target_image_id: Optional[str] = Form(None),
     image_ids: Optional[str] = Form(None),
+    crop_mask_count: int = Form(0),
 ):
     session_id = request.state.session_id
     session_images = image_store.get(session_id, {})
@@ -394,6 +898,17 @@ async def process_images(
     mask_bytes: Optional[bytes] = None
     if mask is not None:
         mask_bytes = await mask.read()
+
+    # 读批量蒙版（crop_mask_count > 0 时从动态字段 mask_0, mask_1, ... 读取）
+    mask_map: Optional[Dict[int, bytes]] = None
+    if crop_mask_count > 0:
+        mask_map = {}
+        form_data = await request.form()
+        for i in range(crop_mask_count):
+            key = f"mask_{i}"
+            if key in form_data:
+                upload_file = form_data[key]
+                mask_map[i] = await upload_file.read()
 
     config = {
         "bg_method": bg_method,
@@ -438,14 +953,20 @@ async def process_images(
             if logo_path.exists():
                 logo_img = Image.open(logo_path).convert("RGBA")
 
-    asyncio.create_task(_batch_process(task.batch_id, image_ids_list, config, logo_img, mask_bytes, session_id=session_id))
-    # 保持引用防止被垃圾回收
-    asyncio.current_task().add_done_callback(lambda _: None)
+    worker_task = asyncio.create_task(_batch_process(task.batch_id, image_ids_list, config, logo_img, mask_bytes, mask_map=mask_map, session_id=session_id))
+    _active_worker_tasks.add(worker_task)
+    worker_task.add_done_callback(_active_worker_tasks.discard)
     return {"batch_id": task.batch_id, "total": task.total, "image_ids": image_ids_list}
 
 
-async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo_img, mask_bytes: Optional[bytes] = None, session_id: str = ""):
-    semaphore = asyncio.Semaphore(CONCURRENT_PROCESS_LIMIT)
+async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo_img, mask_bytes: Optional[bytes] = None, mask_map: Optional[Dict[int, bytes]] = None, session_id: str = ""):
+    # 启用抠图时，外层信号量设为 1（串行处理），避免多张全分辨率图同时驻留内存。
+    # ONNX 推理本身已通过 bg_semaphore=1 串行化，降低并发对吞吐量无影响。
+    has_bg_batch = config.get("bg_method", "none") != "none"
+    effective_limit = 1 if has_bg_batch else CONCURRENT_PROCESS_LIMIT
+    semaphore = asyncio.Semaphore(effective_limit)
+    # 背景移除（ONNX推理）使用独立信号量，避免多张图同时推理导致OOM
+    bg_semaphore = asyncio.Semaphore(CONCURRENT_BG_LIMIT)
 
     async def process_one(image_id: str):
         async with semaphore:
@@ -459,31 +980,149 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
 
             result = ProcessResult(id=image_id, filename=meta["filename"], status="processing")
             try:
-                img = await asyncio.to_thread(Image.open, meta["path"])
-                img = await asyncio.to_thread(ImageOps.exif_transpose, img)
+                cutout_path = get_cutout_path(image_id, session_id=session_id)
+                alpha_path = get_alpha_path(image_id, run_id=batch_id, session_id=session_id)
+                alpha_alias_path = get_alpha_path(image_id, session_id=session_id)
+                has_bg = config["bg_method"] != "none"
+                is_local_bg = config["bg_method"] == "local"
+                has_post_process = (
+                    config["logo_enabled"] and logo_img
+                ) or (
+                    config["wm_mode"] in ("position", "tile", "dense") and config["wm_text"]
+                ) or mask_bytes or mask_map
+                alpha_only_fast_path = has_bg and is_local_bg and not has_post_process
+                result.error_msg = json.dumps({
+                    "alpha_only_fast_path": alpha_only_fast_path,
+                    "has_bg": has_bg,
+                    "is_local_bg": is_local_bg,
+                    "has_post_process": bool(has_post_process),
+                    "bg_method": config.get("bg_method"),
+                    "wm_mode": config.get("wm_mode"),
+                    "wm_text": bool(config.get("wm_text")),
+                    "logo_enabled": bool(config.get("logo_enabled")),
+                    "mask_bytes": bool(mask_bytes),
+                    "mask_map_count": len(mask_map) if mask_map else 0,
+                }, ensure_ascii=False)
 
-                # 1. 抠图
-                if config["bg_method"] != "none":
+                source_path = Path(meta["path"])
+                img = None
+                materialized_output_size = 0
+                source_size = None
+                probe_size = None
+                probe_alpha_path = None
+                probe_alpha_alias_path = None
+
+                # 1. 抠图（使用独立信号量，并发数 = CONCURRENT_BG_LIMIT）
+                if has_bg:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    # 根据设置控制 ONNX 内存预分配
-                    os.environ["ORT_DISABLE_CPU_MEM_ARENA"] = "1" if config["bg_disable_arena"] else "0"
-                    img = await asyncio.to_thread(
-                        remove_background, img, config["bg_method"], config["api_key"],
-                        config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
-                    )
-                    # 始终存一份 PNG 抠图结果（含透明通道），供编辑器使用
-                    cutout_path = TEMP_DIR / session_id / f"{image_id}_cutout.png"
-                    cutout_path.parent.mkdir(parents=True, exist_ok=True)
-                    await asyncio.to_thread(img.save, str(cutout_path), "PNG")
+                    async with bg_semaphore:
+                        # 再次检查取消（等待信号量期间可能已被取消）
+                        if task_manager.is_cancelled(batch_id):
+                            result.status = "error"; result.error_msg = "已取消"
+                            await task_manager.update_result(batch_id, result); return
+
+                        if is_local_bg:
+                            if alpha_only_fast_path:
+                                alpha, source_size, probe_size = await asyncio.to_thread(
+                                    remove_bg_local_probe_alpha_from_path, source_path,
+                                    config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
+                                )
+                                probe_alpha_path = get_probe_alpha_path(image_id, run_id=batch_id, session_id=session_id)
+                                probe_alpha_alias_path = get_probe_alpha_path(image_id, session_id=session_id)
+                                probe_alpha_path.parent.mkdir(parents=True, exist_ok=True)
+                                await asyncio.to_thread(alpha.save, str(probe_alpha_path), "PNG")
+                                await asyncio.to_thread(alpha.save, str(probe_alpha_alias_path), "PNG")
+                                for ext in (".jpg", ".png", ".webp"):
+                                    stale_output = get_output_path(image_id, ext, run_id=batch_id, session_id=session_id)
+                                    if stale_output.exists():
+                                        try:
+                                            stale_output.unlink()
+                                        except OSError:
+                                            pass
+                                try:
+                                    alpha.close()
+                                except Exception:
+                                    pass
+                                del alpha
+                            else:
+                                with Image.open(source_path) as src_img:
+                                    src_img.load()
+                                    img = await asyncio.to_thread(ImageOps.exif_transpose, src_img)
+                                alpha = await asyncio.to_thread(
+                                    remove_bg_local_alpha, img,
+                                    config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
+                                )
+                                alpha_path.parent.mkdir(parents=True, exist_ok=True)
+                                await asyncio.to_thread(alpha.save, str(alpha_path), "PNG")
+                                await asyncio.to_thread(alpha.save, str(alpha_alias_path), "PNG")
+                                if has_post_process:
+                                    base_img = img if img.mode == "RGBA" else img.convert("RGBA")
+                                    try:
+                                        base_img.putalpha(alpha)
+                                    finally:
+                                        try:
+                                            alpha.close()
+                                        except Exception:
+                                            pass
+                                        del alpha
+                                        gc.collect()
+                                    img = base_img
+                                else:
+                                    try:
+                                        alpha.close()
+                                    except Exception:
+                                        pass
+                                    del alpha
+                        else:
+                            with Image.open(source_path) as src_img:
+                                src_img.load()
+                                img = await asyncio.to_thread(ImageOps.exif_transpose, src_img)
+                            # 环境变量 ORT_DISABLE_CPU_MEM_ARENA 由 bg_remover._get_session 统一管理
+                            img = await asyncio.to_thread(
+                                remove_background, img, config["bg_method"], config["api_key"],
+                                config["bg_model"], config["bg_threads"], config["bg_disable_arena"]
+                            )
+                            # 非 local 路径先保持 legacy cutout.png 兼容行为
+                            cutout_path.parent.mkdir(parents=True, exist_ok=True)
+                            await asyncio.to_thread(img.save, str(cutout_path), "PNG")
+
+                    # batch 保守路径：抠图后立刻释放全分辨率结果，后续按需从 cutout / source+alpha 重开
+                    if img is not None and is_local_bg and alpha_only_fast_path:
+                        try:
+                            img.close()
+                        except Exception:
+                            pass
+                        del img
+                        img = None
+                        gc.collect()
+                        _compact_heap()
+                    elif img is not None and not is_local_bg:
+                        try:
+                            img.close()
+                        except Exception:
+                            pass
+                        del img
+                        img = None
+                        gc.collect()
+                        _compact_heap()
+
+                        if has_post_process:
+                            with Image.open(cutout_path) as cutout_img:
+                                cutout_img.load()
+                                img = cutout_img.convert("RGBA")
+                else:
+                    with Image.open(source_path) as src_img:
+                        src_img.load()
+                        img = await asyncio.to_thread(ImageOps.exif_transpose, src_img)
 
                 # 2. Logo (图片型)
                 if config["logo_enabled"] and logo_img:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    img = await asyncio.to_thread(
+                    new_img = await asyncio.to_thread(
                         add_logo, img, logo_img,
                         config["logo_position"],
                         config["logo_ratio"],
@@ -491,13 +1130,14 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         margin=config["logo_margin"],
                         tile=config["logo_tile"],
                     )
+                    del img; img = new_img
 
                 # 3. 显式水印
                 if config["wm_mode"] in ("position", "tile", "dense") and config["wm_text"]:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    img = await asyncio.to_thread(
+                    new_img = await asyncio.to_thread(
                         add_text_watermark, img,
                         config["wm_text"],
                         config["wm_position"],
@@ -509,121 +1149,242 @@ async def _batch_process(batch_id: str, image_ids: List[str], config: dict, logo
                         config["wm_mode"] == "dense",
                         config["wm_dense_density"],
                     )
+                    del img; img = new_img
 
-                # 4. 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-                if config["wm_blind_enabled"] and config["wm_blind_text"]:
-                    img = await asyncio.to_thread(
-                        add_blind_watermark, img, config["wm_blind_text"],
-                        config.get("wm_blind_strength", 16),
-                        config.get("wm_blind_use_mask", True),
-                    )
-
-                # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
-                if mask_bytes:
+                # 4. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+                # 从 mask_map 按图片索引取对应 mask，若无则回退到 mask_bytes
+                img_mask_bytes = mask_bytes
+                if mask_map:
+                    try:
+                        idx = image_ids.index(image_id)
+                        mask_keys = sorted(mask_map.keys())
+                        if mask_keys:
+                            mask_idx = min(idx, mask_keys[-1])
+                            img_mask_bytes = mask_map.get(mask_idx, mask_bytes)
+                    except ValueError:
+                        pass
+                if img_mask_bytes:
                     if task_manager.is_cancelled(batch_id):
                         result.status = "error"; result.error_msg = "已取消"
                         await task_manager.update_result(batch_id, result); return
-                    img = await asyncio.to_thread(apply_mask_crop, img, mask_bytes)
+                    img = await asyncio.to_thread(apply_mask_crop, img, img_mask_bytes)
                     # 保存蒙版供「再次编辑」预填
                     last_mask_path = TEMP_DIR / session_id / f"{image_id}_last_mask.png"
                     last_mask_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(last_mask_path, "wb") as f:
-                        f.write(mask_bytes)
+                        f.write(img_mask_bytes)
 
                 if task_manager.is_cancelled(batch_id):
                     result.status = "error"; result.error_msg = "已取消"
                     await task_manager.update_result(batch_id, result); return
 
-                # 6. 压缩
-                if config["compress_enabled"]:
-                    data = await asyncio.to_thread(
-                        compress_image, img,
-                        config["output_format"],
-                        config["quality"],
-                        config["max_file_size_kb"],
-                        config["max_width"],
+                # local-bg 且无后处理：直接走 alpha-only descriptor + lazy export
+                protocol_version = "legacy"
+                materialized = True
+                output_size = 0
+                result_mode = "legacy"
+                if alpha_only_fast_path:
+                    print(f"DEBUG alpha-fast-path descriptor image_id={image_id} batch_id={batch_id}", flush=True)
+                    release_cached_session()
+                    gc.collect()
+                    _compact_heap()
+
+                    session_temp = TEMP_DIR / session_id
+                    session_temp.mkdir(parents=True, exist_ok=True)
+                    source_img_for_thumb = _find_original_path(session_id, image_id)
+                    if source_img_for_thumb is None:
+                        raise FileNotFoundError("原图不存在")
+
+                    thumb_data = await asyncio.to_thread(
+                        _build_alpha_thumbnail_from_source_and_alpha,
+                        source_img_for_thumb,
+                        probe_alpha_alias_path or alpha_alias_path,
+                        200,
                     )
+                    thumb_path = get_result_thumb_path(image_id, run_id=batch_id, session_id=session_id)
+                    print(f"DEBUG alpha-fast-path before thumb write image_id={image_id} batch_id={batch_id} path={thumb_path}", flush=True)
+                    with open(thumb_path, "wb") as f:
+                        f.write(thumb_data)
+                    print(f"DEBUG alpha-fast-path after thumb write image_id={image_id} batch_id={batch_id} bytes={len(thumb_data)}", flush=True)
+                    protocol_version = "alpha-only-v1"
+                    materialized = False
+                    result_mode = "alpha-only-v1"
+                    output_size = (probe_alpha_path or alpha_path).stat().st_size if (probe_alpha_path or alpha_path).exists() else 0
+                    print(f"DEBUG alpha-fast-path after output-size image_id={image_id} batch_id={batch_id} output_size={output_size}", flush=True)
                 else:
-                    fmt = config.get("output_format", "JPEG").upper()
-                    if fmt in ("JPEG", "JPG"):
-                        # JPEG: 用选中格式+高质量，避免 RGBA→PNG 体积爆炸
+                    print(f"DEBUG legacy-branch image_id={image_id} batch_id={batch_id} has_bg={has_bg} is_local_bg={is_local_bg} has_post_process={has_post_process}", flush=True)
+                    if has_bg and not has_post_process:
+                        with Image.open(cutout_path) as cutout_img:
+                            cutout_img.load()
+                            img = cutout_img.convert("RGBA")
+
+                    # 6. 压缩
+                    original_ext = Path(meta["filename"]).suffix.lower()
+                    prefer_target_jpeg_size = (
+                        config["compress_enabled"]
+                        and config["bg_method"] != "none"
+                        and original_ext in (".jpg", ".jpeg")
+                        and config["output_format"].upper() in ("JPEG", "JPG")
+                        and int(config.get("max_file_size_kb", 0) or 0) <= 0
+                    )
+                    if config["compress_enabled"]:
+                        data = await asyncio.to_thread(
+                            compress_image, img,
+                            config["output_format"],
+                            config["quality"],
+                            config["max_file_size_kb"],
+                            config["max_width"],
+                            meta.get("file_size", 0),
+                            prefer_target_jpeg_size,
+                        )
+                    else:
+                        # 所有格式统一走 compress_image（JPEG 高质量 / PNG palette 量化 / WebP 有损）
+                        fmt = config.get("output_format", "JPEG").upper()
                         data = await asyncio.to_thread(
                             compress_image, img, fmt,
                             max(config.get("quality", 85), 95), 0, 0,
                         )
-                    else:
-                        # PNG/其他: 存为 PNG 并做最大无损压缩，保持透明度
-                        data = await asyncio.to_thread(
-                            lambda: _save_png_lossless(img)
-                        )
 
-                # 保存
-                ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
-                ext = ext_map.get(config["output_format"].upper(), ".jpg")
-                out_path = get_output_path(image_id, ext, run_id=batch_id, session_id=session_id)
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(out_path, "wb") as f:
-                    f.write(data)
+                    # 保存
+                    ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+                    ext = ext_map.get(config["output_format"].upper(), ".jpg")
+                    out_path = get_output_path(image_id, ext, run_id=batch_id, session_id=session_id)
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(out_path, "wb") as f:
+                        f.write(data)
 
-                # 生成结果缩略图
-                out_img = Image.open(out_path)
-                thumb_data = generate_thumbnail(out_img)
-                session_temp = TEMP_DIR / session_id
-                session_temp.mkdir(parents=True, exist_ok=True)
-                thumb_path = session_temp / f"{image_id}_{batch_id}_result_thumb.png"
-                with open(thumb_path, "wb") as f:
-                    f.write(thumb_data)
+                    # 生成结果缩略图（峰值内存优先：输出落盘后短时打开，避免再复制整张处理图）
+                    del img
+                    gc.collect()
+                    _compact_heap()
+
+                    with Image.open(out_path) as out_img:
+                        thumb_data = generate_thumbnail(out_img, copy_image=False)
+                    session_temp = TEMP_DIR / session_id
+                    session_temp.mkdir(parents=True, exist_ok=True)
+                    thumb_path = get_result_thumb_path(image_id, run_id=batch_id, session_id=session_id)
+                    with open(thumb_path, "wb") as f:
+                        f.write(thumb_data)
+                    materialized_output_size = len(data)
+                    output_size = len(data)
 
                 result.status = "done"
                 result.run_id = batch_id
-                result.output_size = len(data)
+                result.output_size = output_size
                 result.output_url = f"/api/download/{batch_id}/{image_id}"
                 result.thumbnail_url = f"/api/result-thumbnail/{batch_id}/{image_id}"
                 result.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                result.error_msg = json.dumps({
+                    "alpha_only_fast_path": alpha_only_fast_path,
+                    "protocol_version": protocol_version,
+                    "materialized": materialized,
+                    "result_mode": result_mode,
+                }, ensure_ascii=False)
+
+                # 先更新进度，再持久化结果元数据；避免磁盘写入失败把已完成结果整批打回 error
+                await task_manager.update_result(batch_id, result)
 
                 # 保存结果元数据（持久化，供页面刷新后重新加载结果卡片）
-                meta_path = session_temp / f"{image_id}_{batch_id}_meta.json"
+                features_str = _compute_features_str(
+                    bg_method=config["bg_method"],
+                    logo_enabled=config["logo_enabled"],
+                    wm_mode=config["wm_mode"],
+                    wm_text=config.get("wm_text", ""),
+                    wm_blind_enabled=config.get("wm_blind_enabled", False),
+                    compress_enabled=config["compress_enabled"],
+                )
+                meta_payload = _build_result_meta(
+                    image_id,
+                    meta["filename"],
+                    batch_id,
+                    features_str,
+                    output_size,
+                    result.finished_at,
+                    protocol_version=protocol_version,
+                    source_image_id=image_id,
+                    result_kind="alpha-cutout" if protocol_version == "alpha-only-v1" else "materialized",
+                    preview_url=f"/api/preview/{batch_id}/{image_id}",
+                    download_url=f"/api/download/{batch_id}/{image_id}",
+                    alpha_url=f"/api/alpha/{batch_id}/{image_id}" if protocol_version == "alpha-only-v1" else "",
+                    materialized=materialized,
+                    cutout_editable=has_bg,
+                    has_alpha_source=has_bg,
+                )
+                meta_payload["result_mode"] = result_mode
+                if protocol_version == "alpha-only-v1":
+                    meta_payload.update({
+                        "render_output_format": config["output_format"].upper(),
+                        "render_quality": config["quality"],
+                        "render_max_file_size_kb": config["max_file_size_kb"],
+                        "render_max_width": config["max_width"],
+                        "source_file_size": meta.get("file_size", 0),
+                        "alpha_storage": "probe",
+                        "source_width": source_size[0] if source_size else 0,
+                        "source_height": source_size[1] if source_size else 0,
+                        "probe_width": probe_size[0] if probe_size else 0,
+                        "probe_height": probe_size[1] if probe_size else 0,
+                        "prefer_target_jpeg_size": (
+                            config["compress_enabled"]
+                            and Path(meta["filename"]).suffix.lower() in (".jpg", ".jpeg")
+                            and config["output_format"].upper() in ("JPEG", "JPG")
+                            and int(config.get("max_file_size_kb", 0) or 0) <= 0
+                        ),
+                    })
+                _save_result_meta(session_id, image_id, batch_id, meta_payload)
+                direct_meta_path = TEMP_DIR / session_id / f"{image_id}_{batch_id}_meta.json"
                 try:
-                    features_str = _compute_features_str(
-                        bg_method=config["bg_method"],
-                        logo_enabled=config["logo_enabled"],
-                        wm_mode=config["wm_mode"],
-                        wm_text=config.get("wm_text", ""),
-                        wm_blind_enabled=config.get("wm_blind_enabled", False),
-                        compress_enabled=config["compress_enabled"],
-                    )
-                    with open(meta_path, "w") as mf:
-                        json.dump({
-                            "id": image_id,
-                            "filename": meta["filename"],
-                            "run_id": batch_id,
-                            "features": features_str,
-                            "output_size": len(data),
-                            "output_url": f"/api/download/{batch_id}/{image_id}",
-                            "thumbnail_url": f"/api/result-thumbnail/{batch_id}/{image_id}",
-                            "finished_at": result.finished_at,
-                        }, mf)
+                    with open(direct_meta_path, "w", encoding="utf-8") as mf:
+                        json.dump(meta_payload, mf, ensure_ascii=False)
                 except Exception:
-                    pass  # 元数据非关键，不阻塞主流程
+                    pass
+                debug_meta_path = get_result_meta_path(image_id, run_id=batch_id, session_id=session_id)
+                try:
+                    with open(debug_meta_path, encoding="utf-8") as _dbg_f:
+                        debug_meta_saved = json.load(_dbg_f)
+                except Exception as _dbg_e:
+                    debug_meta_saved = {"debug_error": str(_dbg_e)}
+                print(f"DEBUG batch meta saved: {debug_meta_path} => {debug_meta_saved}", flush=True)
 
-                del img, out_img
+                if materialized_output_size:
+                    del data
+                gc.collect()
+                _compact_heap()
 
             except Exception as e:
+                print(f"DEBUG batch process error image_id={image_id} batch_id={batch_id}: {e}", flush=True)
                 result.status = "error"
                 result.error_msg = str(e)
                 result.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            await task_manager.update_result(batch_id, result)
+                await task_manager.update_result(batch_id, result)
+                return
 
     # 注册批处理，防止并发清理
     register_batch()
 
-    # 并发处理
-    tasks = [asyncio.create_task(process_one(iid)) for iid in image_ids]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # 预加载抠图模型（隔离模型加载和首次推理的内存尖峰，避免首图处理时飙高）
+    if config.get("bg_method", "none") != "none":
+        await asyncio.to_thread(
+            _prewarm_bg_model,
+            config["bg_method"], config["api_key"],
+            config["bg_model"], config["bg_threads"], config["bg_disable_arena"],
+        )
+        gc.collect()
+        _compact_heap()
+        release_cached_session()
 
-    # 所有图片处理完毕，注销 batch；若无其他活动批次则释放模型内存
-    unregister_batch()
+    # 按需串行/并发处理
+    try:
+        if has_bg_batch:
+            for iid in image_ids:
+                await process_one(iid)
+        else:
+            tasks = [asyncio.create_task(process_one(iid)) for iid in image_ids]
+            await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        # 所有图片处理完毕，注销 batch；若无其他活动批次则释放模型内存
+        unregister_batch()
+        gc.collect()
+        _compact_heap()
 
 
 # ─── WebSocket 进度 ───
@@ -702,6 +1463,30 @@ async def download_single_run(request: Request, run_id: str, image_id: str):
         path = get_output_path(image_id, ext, run_id=run_id, session_id=session_id)
         if path.exists():
             return FileResponse(path, filename=path.name)
+
+    meta = _load_result_meta(session_id, image_id, run_id)
+    if meta and meta.get("protocol_version") == "alpha-only-v1":
+        try:
+            data, ext, filename = await asyncio.to_thread(_materialize_result_bytes, session_id, meta)
+            out_path = get_output_path(image_id, ext, run_id=run_id, session_id=session_id)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(data)
+            output_len = len(data)
+            meta["materialized"] = True
+            meta["output_size"] = output_len
+            meta["output_url"] = f"/api/download/{run_id}/{image_id}"
+            meta["download_url"] = f"/api/download/{run_id}/{image_id}"
+            _save_result_meta(session_id, image_id, run_id, meta)
+            del data
+            gc.collect()
+            _compact_heap()
+            return FileResponse(out_path, filename=filename)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"按需导出失败: {str(e)}")
+
     raise HTTPException(status_code=404, detail="文件不存在")
 
 
@@ -717,9 +1502,30 @@ async def get_result_thumbnail(request: Request, image_id: str):
 @app.get("/api/result-thumbnail/{run_id}/{image_id}")
 async def get_result_thumbnail_run(request: Request, run_id: str, image_id: str):
     session_id = request.state.session_id
-    thumb_path = TEMP_DIR / session_id / f"{image_id}_{run_id}_result_thumb.png"
+    thumb_path = get_result_thumb_path(image_id, run_id=run_id, session_id=session_id)
     if thumb_path.exists():
         return FileResponse(thumb_path, media_type="image/png")
+
+    meta = _load_result_meta(session_id, image_id, run_id)
+    if meta and meta.get("protocol_version") == "alpha-only-v1":
+        source_path = _find_original_path(session_id, meta.get("source_image_id", image_id))
+        alpha_path = _get_alpha_path_from_meta(session_id, meta, image_id)
+        if alpha_path is None:
+            alpha_path = _get_probe_alpha_path_from_meta(session_id, meta, image_id)
+        if source_path and alpha_path:
+            try:
+                thumb_data = await asyncio.to_thread(
+                    _build_alpha_thumbnail_from_source_and_alpha,
+                    source_path,
+                    alpha_path,
+                    200,
+                )
+                thumb_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(thumb_path, "wb") as f:
+                    f.write(thumb_data)
+                return FileResponse(thumb_path, media_type="image/png")
+            except Exception:
+                pass
     raise HTTPException(status_code=404, detail="结果缩略图不存在")
 
 
@@ -735,11 +1541,39 @@ async def download_all(request: Request, data: dict):
         for item in items:
             run_id = item.get("run_id", "")
             image_id = item.get("image_id", "")
+            added = False
             for ext in [".jpg", ".png", ".webp"]:
                 path = get_output_path(image_id, ext, run_id=run_id, session_id=session_id)
                 if path.exists():
                     zf.write(path, path.name)
+                    added = True
                     break
+
+            if added:
+                continue
+
+            meta = _load_result_meta(session_id, image_id, run_id)
+            if meta and meta.get("protocol_version") == "alpha-only-v1":
+                try:
+                    data_bytes, ext, filename = await asyncio.to_thread(_materialize_result_bytes, session_id, meta)
+                    out_path = get_output_path(image_id, ext, run_id=run_id, session_id=session_id)
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(out_path, "wb") as f:
+                        f.write(data_bytes)
+                    output_len = len(data_bytes)
+                    meta["materialized"] = True
+                    meta["output_size"] = output_len
+                    meta["output_url"] = f"/api/download/{run_id}/{image_id}"
+                    meta["download_url"] = f"/api/download/{run_id}/{image_id}"
+                    _save_result_meta(session_id, image_id, run_id, meta)
+                    zf.writestr(filename, data_bytes)
+                    del data_bytes
+                    gc.collect()
+                    _compact_heap()
+                except FileNotFoundError:
+                    continue
+                except Exception:
+                    continue
     buf.seek(0)
     return StreamingResponse(
         buf,
@@ -831,7 +1665,7 @@ async def reprocess_image(
     bg_model: str = Form("rmbg-1.4"),
     api_key: str = Form(""),
     bg_threads: int = Form(0),
-    bg_disable_arena: bool = Form(True),
+    bg_disable_arena: bool = Form(False),
     # Logo
     logo_enabled: bool = Form(False),
     logo_position: str = Form("right-bottom"),
@@ -910,11 +1744,7 @@ async def reprocess_image(
             wm_tile_direction, wm_mode == "dense", wm_dense_density,
         )
 
-    # 4. 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-    if wm_blind_enabled and wm_blind_text:
-        img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
-    # 5. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
+    # 4. 蒙版裁切（用户手绘蒙版；全白/缺失 = no-op）
     if mask_bytes:
         img = apply_mask_crop(img, mask_bytes)
         # 保存蒙版供「再次编辑」预填
@@ -929,13 +1759,9 @@ async def reprocess_image(
             img, output_format, quality, max_file_size_kb, max_width,
         )
     else:
+        # 所有格式统一走 compress_image（JPEG 高质量 / PNG palette 量化 / WebP 有损）
         fmt = output_format.upper() if output_format else "JPEG"
-        if fmt in ("JPEG", "JPG"):
-            # JPEG: 高质量保存，避免 RGBA→PNG 体积爆炸
-            data = compress_image(img, fmt, max(quality, 95), 0, 0)
-        else:
-            # PNG/其他: 无损压缩，保持透明度
-            data = _save_png_lossless(img)
+        data = compress_image(img, fmt, max(quality, 95), 0, 0)
 
     # 保存新结果
     new_run_id = f"reprocess-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -1078,21 +1904,15 @@ async def edit_mask(
                 wm_tile_direction, wm_mode == "dense", wm_dense_density,
             )
 
-        # 盲水印（DCT 中频鲁棒水印，支持 JPEG 输出）
-        if wm_blind_enabled and wm_blind_text:
-            result_img = add_blind_watermark(result_img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
         # 压缩
         if compress_enabled:
             data = compress_image(
                 result_img, output_format, quality, max_file_size_kb, max_width,
             )
         else:
+            # 所有格式统一走 compress_image（JPEG 高质量 / PNG palette 量化 / WebP 有损）
             fmt = output_format.upper() if output_format else "JPEG"
-            if fmt in ("JPEG", "JPG"):
-                data = compress_image(result_img, fmt, max(quality, 95), 0, 0)
-            else:
-                data = _save_png_lossless(result_img)
+            data = compress_image(result_img, fmt, max(quality, 95), 0, 0)
 
         edit_run_id = f"edit-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
@@ -1181,132 +2001,179 @@ async def edit_cutout(
     max_file_size_kb: int = Form(0),
     max_width: int = Form(0),
 ):
-    """接收 Canvas 笔刷编辑后的抠图蒙版，修改透明通道后重新合成。"""
+    """接收 Canvas 笔刷编辑后的抠图蒙版，修改 alpha 后重新合成。"""
     session_id = request.state.session_id
     session_temp = TEMP_DIR / session_id
-    cutout_path = session_temp / f"{image_id}_cutout.png"
-    if not cutout_path.exists():
-        raise HTTPException(status_code=404, detail="抠图结果不存在，请先进行抠图处理")
+    source_path = _find_original_path(session_id, image_id)
+    if not source_path:
+        raise HTTPException(status_code=404, detail="原图不存在")
+
+    alpha_meta = _find_latest_alpha_meta(session_id, image_id)
+    alpha_path = _get_alpha_path_from_meta(session_id, alpha_meta, image_id)
+    if alpha_path is None and alpha_meta and alpha_meta.get("alpha_storage") == "probe":
+        try:
+            alpha_path = await asyncio.to_thread(_materialize_alpha_asset, session_id, alpha_meta, image_id)
+        except FileNotFoundError:
+            alpha_path = None
+    cutout_path = get_cutout_path(image_id, session_id=session_id)
+    if alpha_path is None:
+        if cutout_path.exists():
+            with Image.open(cutout_path) as legacy_cutout:
+                legacy_cutout.load()
+                alpha = legacy_cutout.getchannel("A")
+                alpha_path = get_alpha_path(image_id, session_id=session_id)
+                alpha.save(alpha_path, "PNG")
+        else:
+            raise HTTPException(status_code=404, detail="抠图结果不存在，请先进行抠图处理")
 
     try:
         import numpy as np
 
-        # 加载抠图结果和蒙版
-        cutout_img = Image.open(cutout_path).convert("RGBA")
+        # 加载 alpha 蒙版和编辑 mask
+        current_alpha = Image.open(alpha_path).convert("L")
         mask_bytes = await mask.read()
-        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")  # 灰度图
-        mask_img = mask_img.resize(cutout_img.size, Image.NEAREST)
+        mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
+        mask_img = mask_img.resize(current_alpha.size, Image.NEAREST)
 
-        cutout_arr = np.array(cutout_img, dtype=np.uint8)
+        alpha_arr = np.array(current_alpha, dtype=np.uint8)
         mask_arr = np.array(mask_img, dtype=np.uint8)
 
-        # 应用蒙版到 alpha 通道
-        alpha = cutout_arr[:, :, 3].copy()
         # mask = 0 → alpha = 0 (擦除), mask = 255 → alpha = 255 (恢复), mask = 127 → 不变
-        alpha = np.where(mask_arr == 0, 0, np.where(mask_arr == 255, 255, alpha))
-        cutout_arr[:, :, 3] = alpha
+        alpha_arr = np.where(mask_arr == 0, 0, np.where(mask_arr == 255, 255, alpha_arr))
+        updated_alpha = Image.fromarray(alpha_arr, mode="L")
 
-        # 保存更新后的抠图
-        updated_cutout = Image.fromarray(cutout_arr, mode="RGBA")
-        updated_cutout.save(cutout_path, "PNG")
+        # 保存更新后的 alpha（alias + 当前运行版本）
+        updated_alpha.save(get_alpha_path(image_id, session_id=session_id), "PNG")
 
         # 保存蒙版供再次编辑
         last_mask_path = session_temp / f"{image_id}_last_cutout_mask.png"
         with open(last_mask_path, "wb") as f:
             f.write(mask_bytes)
 
-        # 后续处理（Logo/水印/压缩）
-        img = updated_cutout.copy()
-
-        # Logo
-        if logo_enabled:
-            logo_img = None
-            session_logos = logo_store.get(session_id, {})
-            if logo_file_id and logo_file_id in session_logos:
-                logo_img = Image.open(session_logos[logo_file_id]["path"]).convert("RGBA")
-            else:
-                logo_path = ASSETS_DIR / "logo.png"
-                if logo_path.exists():
-                    logo_img = Image.open(logo_path).convert("RGBA")
-            if logo_img:
-                from backend.processors.logo_adder import add_logo
-                img = add_logo(img, logo_img, logo_position, logo_ratio, logo_opacity, margin=logo_margin, tile=logo_tile)
-
-        # 显式水印
-        if wm_mode in ("position", "tile", "dense") and wm_text:
-            img = add_text_watermark(
-                img, wm_text, wm_position, wm_text_ratio, wm_opacity,
-                wm_text_color, wm_mode in ("tile", "dense"),
-                wm_tile_direction, wm_mode == "dense", wm_dense_density,
-            )
-
-        # 盲水印
-        if wm_blind_enabled and wm_blind_text:
-            img = add_blind_watermark(img, wm_blind_text, wm_blind_strength, wm_blind_use_mask)
-
-        # 压缩
-        if compress_enabled:
-            data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
-        else:
-            fmt = output_format.upper() if output_format else "JPEG"
-            if fmt in ("JPEG", "JPG"):
-                data = compress_image(img, fmt, max(quality, 95), 0, 0)
-            else:
-                data = _save_png_lossless(img)
-
-        # 保存结果文件
-        new_run_id = f"cutout-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-        ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
-        ext = ext_map.get(output_format.upper(), ".jpg")
-        out_path = get_output_path(image_id, ext, run_id=new_run_id, session_id=session_id)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "wb") as f:
-            f.write(data)
-
-        # 结果缩略图
-        out_img = Image.open(out_path)
-        thumb_data = generate_thumbnail(out_img)
-        session_temp.mkdir(parents=True, exist_ok=True)
-        thumb_path = session_temp / f"{image_id}_{new_run_id}_result_thumb.png"
-        with open(thumb_path, "wb") as f:
-            f.write(thumb_data)
-
-        # 结果元数据（持久化）
-        _finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        meta_path = session_temp / f"{image_id}_{new_run_id}_meta.json"
+        # 合成当前可视 cutout，供后续处理复用
+        composed = _compose_rgba_from_source_and_alpha(source_path, get_alpha_path(image_id, session_id=session_id))
         try:
-            cutout_features_str = _compute_features_str(
-                bg_method="local",  # edit-cutout 一定是先做了抠图
-                logo_enabled=logo_enabled,
-                wm_mode=wm_mode,
-                wm_text=wm_text,
-                wm_blind_enabled=wm_blind_enabled,
-                compress_enabled=compress_enabled,
-            )
-            with open(meta_path, "w") as mf:
-                json.dump({
-                    "id": image_id,
-                    "filename": f"{image_id}_cutout.png",
-                    "run_id": new_run_id,
-                    "features": cutout_features_str,
-                    "output_size": len(data),
-                    "output_url": f"/api/download/{new_run_id}/{image_id}",
-                    "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{image_id}",
-                    "finished_at": _finished_at,
-                }, mf)
-        except Exception:
-            pass
+            composed.save(cutout_path, "PNG")  # 兼容缓存
 
-        return {
-            "ok": True,
-            "run_id": new_run_id,
-            "image_id": image_id,
-            "output_size": len(data),
-            "output_url": f"/api/download/{new_run_id}/{image_id}",
-            "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{image_id}",
-            "finished_at": _finished_at,
-            "filename": f"{image_id}_cutout.png",
-        }
+            img = composed.copy()
+
+            # Logo
+            if logo_enabled:
+                logo_img = None
+                session_logos = logo_store.get(session_id, {})
+                if logo_file_id and logo_file_id in session_logos:
+                    logo_img = Image.open(session_logos[logo_file_id]["path"]).convert("RGBA")
+                else:
+                    logo_path = ASSETS_DIR / "logo.png"
+                    if logo_path.exists():
+                        logo_img = Image.open(logo_path).convert("RGBA")
+                if logo_img:
+                    from backend.processors.logo_adder import add_logo
+                    img = add_logo(img, logo_img, logo_position, logo_ratio, logo_opacity, margin=logo_margin, tile=logo_tile)
+
+            # 显式水印
+            if wm_mode in ("position", "tile", "dense") and wm_text:
+                img = add_text_watermark(
+                    img, wm_text, wm_position, wm_text_ratio, wm_opacity,
+                    wm_text_color, wm_mode in ("tile", "dense"),
+                    wm_tile_direction, wm_mode == "dense", wm_dense_density,
+                )
+
+            # 压缩
+            if compress_enabled:
+                data = compress_image(img, output_format, quality, max_file_size_kb, max_width)
+            else:
+                fmt = output_format.upper() if output_format else "JPEG"
+                data = compress_image(img, fmt, max(quality, 95), 0, 0)
+
+            # 保存结果文件
+            new_run_id = f"cutout-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            alpha_run_path = get_alpha_path(image_id, run_id=new_run_id, session_id=session_id)
+            updated_alpha.save(alpha_run_path, "PNG")
+            ext_map = {"JPEG": ".jpg", "JPG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+            ext = ext_map.get(output_format.upper(), ".jpg")
+            out_path = get_output_path(image_id, ext, run_id=new_run_id, session_id=session_id)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(data)
+
+            # 结果缩略图
+            out_img = Image.open(out_path)
+            thumb_data = generate_thumbnail(out_img)
+            session_temp.mkdir(parents=True, exist_ok=True)
+            thumb_path = get_result_thumb_path(image_id, run_id=new_run_id, session_id=session_id)
+            with open(thumb_path, "wb") as f:
+                f.write(thumb_data)
+
+            # 结果元数据（持久化）
+            _finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                cutout_features_str = _compute_features_str(
+                    bg_method="local",
+                    logo_enabled=logo_enabled,
+                    wm_mode=wm_mode,
+                    wm_text=wm_text,
+                    wm_blind_enabled=wm_blind_enabled,
+                    compress_enabled=compress_enabled,
+                )
+                meta_payload = _build_result_meta(
+                    image_id,
+                    f"{image_id}_cutout.png",
+                    new_run_id,
+                    cutout_features_str,
+                    len(data),
+                    _finished_at,
+                    protocol_version="alpha-only-v1",
+                    source_image_id=image_id,
+                    result_kind="alpha-cutout",
+                    preview_url=f"/api/preview/{new_run_id}/{image_id}",
+                    download_url=f"/api/download/{new_run_id}/{image_id}",
+                    alpha_url=f"/api/alpha/{new_run_id}/{image_id}",
+                    materialized=True,
+                    cutout_editable=True,
+                    has_alpha_source=True,
+                )
+                meta_payload.update({
+                    "render_output_format": output_format.upper(),
+                    "render_quality": quality,
+                    "render_max_file_size_kb": max_file_size_kb,
+                    "render_max_width": max_width,
+                })
+                _save_result_meta(session_id, image_id, new_run_id, meta_payload)
+            except Exception:
+                pass
+
+            return {
+                "ok": True,
+                "run_id": new_run_id,
+                "image_id": image_id,
+                "output_size": len(data),
+                "output_url": f"/api/download/{new_run_id}/{image_id}",
+                "preview_url": f"/api/preview/{new_run_id}/{image_id}",
+                "thumbnail_url": f"/api/result-thumbnail/{new_run_id}/{image_id}",
+                "finished_at": _finished_at,
+                "filename": f"{image_id}_cutout.png",
+                "protocol_version": "alpha-only-v1",
+                "cutout_editable": True,
+                "has_alpha_source": True,
+            }
+        finally:
+            try:
+                composed.close()
+            except Exception:
+                pass
+            try:
+                img.close()
+            except Exception:
+                pass
+            try:
+                current_alpha.close()
+            except Exception:
+                pass
+            try:
+                updated_alpha.close()
+            except Exception:
+                pass
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1358,26 +2225,15 @@ async def update_settings(
 async def get_apikey():
     """获取当前保存的 API Key"""
     from config import REMBG_API_KEY
-    return {"api_key": REMBG_API_KEY if hasattr(__import__('config'), 'REMBG_API_KEY') else ""}
+    # 优先返回持久化的运行时配置，否则使用代码里的默认值
+    saved = _load_runtime_config("api_key")
+    return {"api_key": saved if saved else REMBG_API_KEY}
 
 
 @app.post("/api/config/apikey")
 async def update_apikey(api_key: str = Form(...)):
-    """更新 API Key 到配置文件"""
-    config_path = Path(__file__).resolve().parent.parent / "config.py"
-    content = config_path.read_text(encoding="utf-8")
-    lines = content.split('\n')
-    key_line_found = False
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith('REMBG_API_KEY'):
-            new_lines.append(f'REMBG_API_KEY = "{api_key}"')
-            key_line_found = True
-        else:
-            new_lines.append(line)
-    if not key_line_found:
-        new_lines.append(f'\nREMBG_API_KEY = "{api_key}"')
-    config_path.write_text('\n'.join(new_lines), encoding="utf-8")
+    """更新 API Key（保存到可写位置）"""
+    _save_runtime_config("api_key", api_key)
     return {"ok": True, "api_key": api_key}
 
 
@@ -1385,8 +2241,11 @@ async def update_apikey(api_key: str = Form(...)):
 
 @app.get("/api/config/default-logo")
 async def get_default_logo_config():
-    """获取默认 Logo 配置"""
+    """获取默认 Logo 配置（优先返回用户保存的运行时配置）"""
     from config import DEFAULT_LOGO_POSITION, DEFAULT_LOGO_RATIO, DEFAULT_LOGO_OPACITY, DEFAULT_LOGO_MARGIN
+    saved = _load_runtime_config("default_logo")
+    if saved:
+        return saved
     return {
         "position": DEFAULT_LOGO_POSITION,
         "ratio": DEFAULT_LOGO_RATIO,
@@ -1402,23 +2261,13 @@ async def update_default_logo_config(
     opacity: float = Form(0.8),
     margin: int = Form(20),
 ):
-    """更新默认 Logo 配置到配置文件"""
-    config_path = Path(__file__).resolve().parent.parent / "config.py"
-    content = config_path.read_text(encoding="utf-8")
-    lines = content.split('\n')
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith('DEFAULT_LOGO_POSITION'):
-            new_lines.append(f'DEFAULT_LOGO_POSITION = "{position}"')
-        elif line.strip().startswith('DEFAULT_LOGO_RATIO'):
-            new_lines.append(f'DEFAULT_LOGO_RATIO = {ratio}')
-        elif line.strip().startswith('DEFAULT_LOGO_OPACITY'):
-            new_lines.append(f'DEFAULT_LOGO_OPACITY = {opacity}')
-        elif line.strip().startswith('DEFAULT_LOGO_MARGIN'):
-            new_lines.append(f'DEFAULT_LOGO_MARGIN = {margin}')
-        else:
-            new_lines.append(line)
-    config_path.write_text('\n'.join(new_lines), encoding="utf-8")
+    """更新默认 Logo 配置（保存到可写位置）"""
+    _save_runtime_config("default_logo", {
+        "position": position,
+        "ratio": ratio,
+        "opacity": opacity,
+        "margin": margin,
+    })
     return {"ok": True, "position": position, "ratio": ratio, "opacity": opacity, "margin": margin}
 
 
@@ -1435,3 +2284,38 @@ async def upload_default_logo_image(file: UploadFile = File(...)):
         return {"ok": True, "thumbnail_url": "/api/logo-default"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── 默认压缩输出配置管理 ───
+
+
+@app.get("/api/config/default-compress")
+async def get_default_compress_config():
+    """获取默认压缩输出设置（优先返回用户保存的运行时配置）"""
+    from config import DEFAULT_OUTPUT_FORMAT, DEFAULT_QUALITY, DEFAULT_MAX_WIDTH, DEFAULT_MAX_FILE_SIZE_KB
+    saved = _load_runtime_config("default_compress")
+    if saved:
+        return saved
+    return {
+        "output_format": DEFAULT_OUTPUT_FORMAT,
+        "quality": DEFAULT_QUALITY,
+        "max_width": DEFAULT_MAX_WIDTH,
+        "max_file_size_kb": DEFAULT_MAX_FILE_SIZE_KB,
+    }
+
+
+@app.post("/api/config/default-compress")
+async def update_default_compress_config(
+    output_format: str = Form("JPEG"),
+    quality: int = Form(90),
+    max_width: int = Form(0),
+    max_file_size_kb: int = Form(0),
+):
+    """更新默认压缩输出设置（保存到可写位置）"""
+    _save_runtime_config("default_compress", {
+        "output_format": output_format,
+        "quality": quality,
+        "max_width": max_width,
+        "max_file_size_kb": max_file_size_kb,
+    })
+    return {"ok": True, "output_format": output_format, "quality": quality, "max_width": max_width, "max_file_size_kb": max_file_size_kb}

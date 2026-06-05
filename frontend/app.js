@@ -4,6 +4,14 @@ let currentBatchId = null;
 let ws = null;
 let currentFeatures = [];
 
+// 图片裁切状态
+let cropImages = [];           // { id, filename, thumbnailUrl, hasMask }
+let cropMasksByImageId = {};   // { [imageId]: Blob }
+
+function getCutoutImageUrl(imageId) {
+    return `${API}/api/cutout/${imageId}?t=${Date.now()}`;
+}
+
 // ─── Cutout Editor State ───
 let cutoutEditor = {
     imageId: null,
@@ -52,7 +60,7 @@ function openCutoutEditor(imageId) {
         alert('加载抠图结果失败，请先进行抠图处理');
         closeCutoutEditor();
     };
-    img.src = `${API}/api/cutout/${imageId}?t=${Date.now()}`;
+    img.src = getCutoutImageUrl(imageId);
 }
 
 function closeCutoutEditor() {
@@ -444,7 +452,7 @@ async function saveCutoutEdit() {
             card.innerHTML = `
                 <div class="preview-row">
                     <div class="before">
-                        <img src="${API}/api/cutout/${cutoutEditor.imageId}?t=${Date.now()}" onerror="this.style.display='none'">
+                        <img src="${getCutoutImageUrl(cutoutEditor.imageId)}" onerror="this.style.display='none'">
                         <span class="label">编辑前</span>
                     </div>
                     <div class="after">
@@ -460,7 +468,6 @@ async function saveCutoutEdit() {
                     <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
                     <button class="btn btn-outline btn-sm" onclick="showPreview('${cutoutEditor.imageId}', '${API}${data.output_url}', '${cutoutEditor.imageId}_cutout.png')">预览</button>
                     ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${cutoutEditor.imageId}')">修改抠图</button>` : ''}
-                    <button class="btn btn-outline btn-sm" onclick="openEditor('${cutoutEditor.imageId}')">裁切</button>
                     <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${cutoutEditor.imageId}', '${features.join(',')}')">继续处理</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
                 </div>
@@ -552,8 +559,6 @@ function renderImages() {
     });
     document.getElementById('imageCount').textContent = `${uploadedImages.length} 张图片`;
     document.getElementById('processBtn').disabled = uploadedImages.length === 0;
-    const maskBtn = document.getElementById('openMaskCropBtn');
-    if (maskBtn) maskBtn.disabled = uploadedImages.length === 0;
 }
 
 async function deleteImage(id) {
@@ -561,6 +566,90 @@ async function deleteImage(id) {
     uploadedImages = uploadedImages.filter(i => i.id !== id);
     renderImages();
 }
+
+// ─── 图片裁切上传 ───
+
+function handleCropUpload(files) {
+    if (!files.length) return;
+    const formData = new FormData();
+    for (const f of files) {
+        formData.append('files', f);
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}/api/upload`, true);
+    xhr.onload = () => {
+        if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText);
+            if (data.images) {
+                data.images.forEach(img => {
+                    if (!cropImages.find(c => c.id === img.id)) {
+                        cropImages.push({ id: img.id, filename: img.filename, thumbnail_url: img.thumbnail_url, hasMask: false });
+                    }
+                });
+                renderCropImages();
+            }
+        }
+    };
+    xhr.send(formData);
+}
+
+function renderCropImages() {
+    const grid = document.getElementById('cropImageGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (cropImages.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted);font-size:13px;padding:8px 0;">暂无裁切参考图片，请上传</p>';
+        return;
+    }
+    cropImages.forEach(c => {
+        const card = document.createElement('div');
+        card.className = 'crop-image-card';
+        card.innerHTML = `
+            <img src="${API}${c.thumbnail_url}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23eee%22 width=%22100%22 height=%22100%22/></svg>'">
+            <div class="crop-image-info">
+                <span class="crop-image-name" title="${c.filename}">${c.filename.length > 12 ? c.filename.slice(0,12)+'...' : c.filename}</span>
+                ${c.hasMask ? '<span class="crop-image-badge">已裁切</span>' : '<span class="crop-image-badge pending">未裁切</span>'}
+                <div class="crop-image-actions">
+                    <button class="btn btn-outline btn-xs" onclick="openCropEditor('${c.id}')">框选区域</button>
+                    <button class="btn btn-danger btn-xs" onclick="removeCropImage('${c.id}')">&times;</button>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function openCropEditor(imageId) {
+    if (!imageId) return;
+    editorMode = 'crop-define';
+    editorSourceRunId = null;
+    openEditor(imageId);
+}
+
+function removeCropImage(id) {
+    cropImages = cropImages.filter(c => c.id !== id);
+    delete cropMasksByImageId[id];
+    renderCropImages();
+}
+
+// ─── Crop upload zone init ───
+(function initCropUpload() {
+    const zone = document.getElementById('cropUploadZone');
+    const input = document.getElementById('cropFileInput');
+    if (!zone || !input) return;
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleCropUpload(e.dataTransfer.files);
+    });
+    input.addEventListener('change', e => {
+        if (e.target.files.length) handleCropUpload(e.target.files);
+        e.target.value = '';
+    });
+})();
 
 // ─── Settings toggle ───
 
@@ -580,6 +669,10 @@ document.getElementById('enableLogo').addEventListener('change', e => {
 document.getElementById('enableCompress').addEventListener('change', e => {
     document.getElementById('compressSection').classList.toggle('hidden', !e.target.checked);
     document.getElementById('featureCompress').classList.toggle('feature-item--active', e.target.checked);
+});
+document.getElementById('enableCrop').addEventListener('change', e => {
+    document.getElementById('cropSection').classList.toggle('hidden', !e.target.checked);
+    document.getElementById('featureCrop').classList.toggle('feature-item--active', e.target.checked);
 });
 document.getElementById('enableWatermark').addEventListener('change', e => {
     document.getElementById('watermarkSection').classList.toggle('hidden', !e.target.checked);
@@ -658,8 +751,8 @@ function syncPaletteFromSelect(selectId) {
 }
 
 function toggleFeature(name) {
-    const sectionMap = { bg: 'bgSection', logo: 'logoSection', compress: 'compressSection', watermark: 'watermarkSection', blind: 'blindSection' };
-    const featureMap = { bg: 'featureBgRemoval', logo: 'featureLogo', compress: 'featureCompress', watermark: 'featureWatermark', blind: 'featureBlindWatermark' };
+    const sectionMap = { bg: 'bgSection', logo: 'logoSection', crop: 'cropSection', compress: 'compressSection', watermark: 'watermarkSection', blind: 'blindSection' };
+    const featureMap = { bg: 'featureBgRemoval', logo: 'featureLogo', crop: 'featureCrop', compress: 'featureCompress', watermark: 'featureWatermark', blind: 'featureBlindWatermark' };
     const section = document.getElementById(sectionMap[name]);
     const feature = document.getElementById(featureMap[name]);
     const expandBtn = feature.querySelector('.feature-expand');
@@ -853,6 +946,7 @@ function updateLogoPreview() {
 
 // 页面加载时初始化
 window.addEventListener('load', initLogoPreview);
+window.addEventListener('load', loadDefaultCompressSettings);
 
 // ─── Range slider ───
 
@@ -891,6 +985,84 @@ document.querySelectorAll('.value-input').forEach(input => {
     });
 });
 
+// 可编辑滑块数值：点击span直接编辑数值
+document.querySelectorAll('.range-row .value[id]').forEach(span => {
+    span.title = '点击编辑数值';
+    span.style.cursor = 'pointer';
+
+    span.addEventListener('click', function (e) {
+        if (this.dataset.editing === 'true') return;
+        e.stopPropagation();
+        // 检测当前后缀
+        const txt = this.textContent.trim();
+        let suffix = '';
+        if (txt.endsWith('%')) suffix = '%';
+        else if (txt.endsWith('px')) suffix = 'px';
+        this.dataset.suffix = suffix;
+        this.dataset.editing = 'true';
+        this.dataset.originalText = txt;
+        this.contentEditable = true;
+        this.focus();
+        // 选中全部文本
+        const range = document.createRange();
+        range.selectNodeContents(this);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    });
+
+    span.addEventListener('blur', function () {
+        finishSpanEdit(this);
+    });
+
+    span.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            this.blur();
+        } else if (e.key === 'Escape') {
+            this.textContent = this.dataset.originalText || this.textContent;
+            this.contentEditable = false;
+            this.dataset.editing = 'false';
+        }
+    });
+});
+
+function finishSpanEdit(span) {
+    if (span.dataset.editing !== 'true') return;
+    span.contentEditable = false;
+    span.dataset.editing = 'false';
+
+    const suffix = span.dataset.suffix || '';
+    let text = span.textContent.trim();
+    // 去除用户可能输入的后缀
+    if (text.endsWith('%')) text = text.slice(0, -1).trim();
+    else if (text.endsWith('px')) text = text.slice(0, -2).trim();
+
+    let val = parseInt(text);
+    if (isNaN(val)) {
+        span.textContent = span.dataset.originalText || '';
+        return;
+    }
+
+    // 找到对应滑块 (约定：span id = input id + 'Val')
+    const inputId = span.id.replace('Val', '');
+    const input = document.getElementById(inputId);
+    if (!input || input.tagName !== 'INPUT') {
+        span.textContent = span.dataset.originalText || '';
+        return;
+    }
+
+    const min = parseInt(input.min) || 0;
+    const max = parseInt(input.max) || 100;
+    val = Math.max(min, Math.min(max, val));
+
+    input.value = val;
+    span.textContent = val + suffix;
+
+    // 触发 input 事件，保持其他监听器同步
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // ─── Collect current config ───
 
 function collectConfig() {
@@ -900,7 +1072,7 @@ function collectConfig() {
     form.append('bg_model', document.getElementById('bgModel').value);
     form.append('api_key', document.getElementById('apiKey').value);
     form.append('bg_threads', localStorage.getItem('settingThreads') || 0);
-    form.append('bg_disable_arena', localStorage.getItem('settingDisableArena') !== 'false');
+    form.append('bg_disable_arena', localStorage.getItem('settingDisableArena') === 'true');
     form.append('logo_enabled', document.getElementById('enableLogo').checked);
     form.append('logo_position', selectedPosition);
     form.append('logo_ratio', document.getElementById('logoRatio').value / 100);
@@ -936,7 +1108,8 @@ function collectConfig() {
         form.append('max_file_size_kb', document.getElementById('maxFileSize').value);
         form.append('max_width', document.getElementById('maxWidth').value);
     } else {
-        form.append('output_format', 'PNG');
+        // 关闭压缩时沿用用户选择的格式，用高质量
+        form.append('output_format', document.getElementById('outputFormat').value);
         form.append('quality', '95');
     }
     // 蒙版由 openMaskCropFrom* 入口直接附加 mask 文件，无需在 collectConfig 中处理
@@ -949,8 +1122,27 @@ function collectFeatures() {
     if (document.getElementById('enableLogo').checked) features.push('logo');
     if (document.getElementById('enableWatermark').checked) features.push('watermark');
     // if (document.getElementById('enableBlindWatermark').checked) features.push('blind');  // [DISABLED: 盲水印暂屏蔽]
+    if (document.getElementById('enableCrop').checked) features.push('crop');
     if (document.getElementById('enableCompress').checked) features.push('compress');
     return features;
+}
+
+// ─── Toast ───
+
+function showToast(message, duration = 3000) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+    // 触发入场动画后自动移除
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }, duration);
 }
 
 // ─── Process ───
@@ -965,21 +1157,34 @@ async function startProcess() {
     btn.textContent = '处理中...';
     currentFeatures = collectFeatures();
 
+    if (currentFeatures.includes('bg')) {
+        showToast('加载本地模型进行处理，大约需要60s左右，请耐心等待。');
+    }
+
     try {
         const form = collectConfig();
         // 告诉后端只处理当前上传的图片，避免处理已删除的旧图片
         form.append('image_ids', uploadedImages.map(i => i.id).join(','));
+        // 附加上传的裁切蒙版（批量裁切）
+        const cropIds = Object.keys(cropMasksByImageId);
+        if (cropIds.length > 0) {
+            const imageIdList = uploadedImages.map(i => i.id);
+            const maskArray = cropIds.map(id => cropMasksByImageId[id]);
+            for (let i = 0; i < imageIdList.length; i++) {
+                const maskIdx = Math.min(i, maskArray.length - 1);
+                const blob = maskArray[maskIdx];
+                form.append(`mask_${i}`, blob, `mask_${i}.png`);
+            }
+            form.append('crop_mask_count', imageIdList.length);
+        }
         const res = await fetch(`${API}/api/process`, { method: 'POST', body: form });
         const data = await res.json();
 
         if (!res.ok) {
             // 后端拒绝（如重启后旧图片 ID 失效），清除本地状态让用户重新上传
             uploadedImages = [];
-            document.getElementById('fileList').innerHTML = '';
             document.getElementById('imageCount').textContent = '0 张图片';
             document.getElementById('processBtn').disabled = true;
-            const maskBtn = document.getElementById('openMaskCropBtn');
-            if (maskBtn) maskBtn.disabled = true;
             alert(data.detail || '图片已失效，请重新上传');
             btn.disabled = false;
             btn.textContent = '开始处理';
@@ -1012,6 +1217,94 @@ async function startProcess() {
         alert('启动处理失败: ' + err.message);
         btn.disabled = false;
         btn.textContent = '开始处理';
+    }
+}
+
+// ─── 裁切批量流程：逐张框选 → 统一处理 ───
+
+async function startCropBatchProcess() {
+    if (cropImages.length === 0) {
+        alert('请先上传裁切图片');
+        return;
+    }
+    showToast('请依次为每张图片框选裁切区域');
+    window._cropQueue = cropImages.map(c => c.id);
+    window._cropQueueActive = true;
+    openNextCropEditor();
+}
+
+function openNextCropEditor() {
+    if (!window._cropQueue || window._cropQueue.length === 0) {
+        delete window._cropQueue;
+        delete window._cropQueueActive;
+        submitCropBatch();
+        return;
+    }
+    const nextId = window._cropQueue.shift();
+    editorMode = 'crop-define';
+    editorSourceRunId = null;
+    openEditor(nextId);
+}
+
+async function submitCropBatch() {
+    const masked = cropImages.filter(c => c.hasMask);
+    if (masked.length === 0) {
+        alert('没有已定义裁切区域的图片');
+        return;
+    }
+    const ids = masked.map(c => c.id);
+    const form = new FormData();
+    form.append('image_ids', ids.join(','));
+    form.append('crop_mask_count', ids.length);
+    for (let i = 0; i < ids.length; i++) {
+        const blob = cropMasksByImageId[ids[i]];
+        if (blob) form.append(`mask_${i}`, blob, `mask_${i}.png`);
+    }
+    form.append('bg_method', 'none');
+    form.append('logo_enabled', 'false');
+    form.append('wm_mode', 'off');
+    form.append('compress_enabled', 'true');
+    try {
+        const res = await fetch(`${API}/api/process`, { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.detail || '处理失败');
+            return;
+        }
+        currentBatchId = data.batch_id;
+        document.getElementById('progressPanel').classList.remove('hidden');
+        document.getElementById('progressText').textContent = '裁切中...';
+        document.getElementById('progressPercent').textContent = '0%';
+        document.getElementById('progressFill').style.width = '0%';
+        document.getElementById('progressFill').classList.remove('done');
+        document.querySelectorAll('#resultGrid .result-card .status-processing').forEach(el => {
+            const card = el.closest('.result-card');
+            if (card) card.remove();
+        });
+        document.getElementById('resultPagination').innerHTML = '';
+        document.getElementById('resultPagination').classList.add('hidden');
+        // 为裁切图片创建结果卡片（cropImages 而非 uploadedImages）
+        const grid = document.getElementById('resultGrid');
+        masked.forEach(img => {
+            const cardId = `result-${data.batch_id}-${img.id}`;
+            if (document.getElementById(cardId)) return;
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.id = cardId;
+            card.dataset.runId = data.batch_id;
+            card.dataset.imageId = img.id;
+            card.dataset.features = 'crop,compress';
+            card.innerHTML = `
+                <div class="status-processing"><div class="spinner"></div><div class="text">处理中...</div></div>
+                <div class="meta"><span class="filename">${img.filename}</span></div>
+            `;
+            grid.appendChild(card);
+        });
+        resultPage = 1;
+        applyPagination();
+        connectWebSocket(data.batch_id);
+    } catch (err) {
+        alert('提交失败: ' + err.message);
     }
 }
 
@@ -1113,11 +1406,14 @@ function updateResultCard(result, itemPct) {
             <div class="meta"><span class="filename">${result.filename}</span></div>
         `;
     } else if (result.status === 'done') {
-        const meta = uploadedImages.find(i => i.id === result.id);
-        card.dataset.features = currentFeatures.join(',');
+        const meta = uploadedImages.find(i => i.id === result.id) || cropImages.find(i => i.id === result.id);
+        card.dataset.features = result.features || card.dataset.features || currentFeatures.join(',');
+        card.dataset.protocolVersion = result.protocol_version || '';
+        card.dataset.cutoutEditable = String(result.cutout_editable ?? false);
+        card.dataset.hasAlphaSource = String(result.has_alpha_source ?? false);
         const featuresStr = card.dataset.features;
         const features = card.dataset.features ? card.dataset.features.split(',') : [];
-        const hasBg = features.includes('bg');
+        const hasBg = (result.cutout_editable ?? features.includes('bg')) || (result.has_alpha_source ?? false);
         card.innerHTML = `
             <div class="preview-row">
                 <div class="before">
@@ -1138,10 +1434,9 @@ function updateResultCard(result, itemPct) {
                 <a class="btn btn-primary btn-sm" href="${API}${result.output_url}" download>下载</a>
                 <button class="btn btn-outline btn-sm" onclick="showPreview('${result.id}', '${API}${result.output_url}', '${result.filename}')">预览</button>
                 ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${result.id}')">修改抠图</button>` : ''}
-                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
                 <button class="btn btn-outline btn-sm" onclick="openReprocess('${result.run_id}', '${result.id}', '${featuresStr}')">继续处理</button>
                 <!-- [HIDDEN: 盲水印提取功能暂屏蔽] <button class="btn btn-outline btn-sm" onclick="extractWatermarkFromResult('${result.run_id}', '${result.id}')">提取水印</button> -->
-                <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
             </div>
         `;
         applyPagination();
@@ -1156,8 +1451,7 @@ function updateResultCard(result, itemPct) {
                 <span class="size">${(result.output_size / 1024 / 1024).toFixed(2)} MB</span>
             </div>
             <div class="actions">
-                <button class="btn btn-outline btn-sm" onclick="openEditor('${result.id}')">裁切</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteResult('result-${result.id}')">删除</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
             </div>
         `;
     }
@@ -1184,6 +1478,12 @@ function downloadAll() {
         if (!link) return;
         const href = link.getAttribute('href');
         const path = href.replace(API, '');
+        const runId = card.dataset.runId || '';
+        const imageId = card.dataset.imageId || '';
+        if (runId && imageId) {
+            items.push({ run_id: runId, image_id: imageId });
+            return;
+        }
         const match = path.match(/\/api\/download\/([^/]+)\/([^/]+)/);
         if (match) {
             items.push({ run_id: match[1], image_id: match[2] });
@@ -1255,12 +1555,28 @@ function openReprocess(runId, imageId, excludeFeatures) {
 
     const exclude = excludeFeatures ? excludeFeatures.split(',').filter(Boolean) : [];
 
-    document.getElementById('reprocessPreview').innerHTML =
-        `<img src="${API}/api/result-thumbnail/${runId}/${imageId}?t=${Date.now()}">`;
+    // 先检查源图片是否存在
+    const previewWrap = document.getElementById('reprocessPreview');
+    const sourceImg = new Image();
+    sourceImg.onload = () => {
+        // 源图片存在，正常显示预览和表单
+        previewWrap.innerHTML = `<img src="${API}/api/result-thumbnail/${runId}/${imageId}?t=${Date.now()}">`;
+        document.getElementById('reprocessFormBody').classList.remove('hidden');
+        document.querySelector('#reprocessOverlay .modal-footer .btn-primary').style.display = '';
+        document.getElementById('reprocessSourceError').classList.add('hidden');
+    };
+    sourceImg.onerror = () => {
+        // 源图片不存在，显示错误提示
+        previewWrap.innerHTML = '<div class="reprocess-error"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#e74c3c" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><p>源图片已不存在或无法打开，无法继续处理</p></div>';
+        document.getElementById('reprocessFormBody').classList.add('hidden');
+        document.querySelector('#reprocessOverlay .modal-footer .btn-primary').style.display = 'none';
+        document.getElementById('reprocessSourceError').classList.remove('hidden');
+    };
+    sourceImg.src = `${API}/api/result-thumbnail/${runId}/${imageId}?t=${Date.now()}`;
 
     // 显示所有分区，排除已处理的功能（盲水印 [DISABLED] 已从列表中移除）
-    const sections = ['reprocessBg', 'reprocessLogo', 'reprocessWm', 'reprocessCompress'];
-    const featureKeys = ['bg', 'logo', 'watermark', 'compress'];
+    const sections = ['reprocessBg', 'reprocessLogo', 'reprocessWm', 'reprocessCrop'];
+    const featureKeys = ['bg', 'logo', 'watermark', 'crop'];
     sections.forEach((id, i) => {
         const el = document.getElementById(id);
         if (el) {
@@ -1311,6 +1627,10 @@ function openReprocess(runId, imageId, excludeFeatures) {
     document.getElementById('reprocessBlind').classList.remove('open');
     document.getElementById('reprocessBlindText').value = document.getElementById('wmBlindText').value || '';
 
+    // 图片裁切
+    document.getElementById('reprocessCropEnabled').checked = false;
+    document.getElementById('reprocessCrop').classList.remove('open');
+
     // 压缩：从主面板复制设置
     document.getElementById('reprocessCompressEnabled').checked = true;
     document.getElementById('reprocessCompress').classList.add('open');
@@ -1340,6 +1660,7 @@ function collectReprocessFeatures() {
     if (document.getElementById('reprocessLogoEnabled').checked) features.push('logo');
     if (document.getElementById('reprocessWmEnabled').checked) features.push('watermark');
     // if (document.getElementById('reprocessBlindEnabled').checked) features.push('blind');  // [DISABLED: 盲水印暂屏蔽]
+    if (document.getElementById('reprocessCropEnabled').checked) features.push('crop');
     if (document.getElementById('reprocessCompressEnabled').checked) features.push('compress');
     return features;
 }
@@ -1396,7 +1717,7 @@ function buildReprocessForm(maskBlob) {
     form.append('bg_model', document.getElementById('reprocessBgModel').value);
     form.append('api_key', document.getElementById('reprocessApiKey').value);
     form.append('bg_threads', localStorage.getItem('settingThreads') || 0);
-    form.append('bg_disable_arena', localStorage.getItem('settingDisableArena') !== 'false');
+    form.append('bg_disable_arena', localStorage.getItem('settingDisableArena') === 'true');
 
     form.append('logo_enabled', logoEnabled);
     if (logoEnabled) {
@@ -1435,7 +1756,8 @@ function buildReprocessForm(maskBlob) {
         form.append('max_file_size_kb', parseInt(document.getElementById('reprocessMaxFileSize').value) || 0);
         form.append('max_width', parseInt(document.getElementById('reprocessMaxWidth').value) || 0);
     } else {
-        form.append('output_format', 'PNG');
+        // 关闭压缩时沿用用户选择的格式，用高质量
+        form.append('output_format', document.getElementById('reprocessOutputFormat').value);
         form.append('quality', '95');
     }
 
@@ -1477,7 +1799,6 @@ function appendReprocessCard(data) {
             <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
             <button class="btn btn-outline btn-sm" onclick="showPreview('${data.image_id}', '${API}${data.output_url}', '${data.filename}')">预览</button>
             ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${data.image_id}')">修改抠图</button>` : ''}
-            <button class="btn btn-outline btn-sm" onclick="openEditor('${data.image_id}')">裁切</button>
             <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${data.image_id}', '${card.dataset.features}')">继续处理</button>
             <button class="btn btn-danger btn-sm" onclick="deleteResult('${card.id}')">删除</button>
         </div>
@@ -1492,7 +1813,10 @@ async function clearAll() {
         await fetch(`${API}/api/results`, { method: 'DELETE' });
     } catch (e) {}
     uploadedImages = [];
+    cropImages = [];
+    cropMasksByImageId = {};
     renderImages();
+    renderCropImages();
     document.getElementById('progressSection').classList.add('hidden');
     document.getElementById('downloadAllBtn').classList.add('hidden');
     document.getElementById('progressFill').style.width = '0%';
@@ -1651,8 +1975,14 @@ function openEditor(imageId) {
     editorImageId = imageId;
     editorReady = false;
     editorZoom = 1;
-    editorMode = 'modify';
+    // editorMode is set by the caller (openCropEditor, openNextCropEditor, etc.)
+    // do NOT reset it here
     editorSourceRunId = null;
+
+    // 根据模式更新保存按钮文案
+    const _saveBtn = document.querySelector('#editorOverlay .btn-primary');
+    if (_saveBtn) _saveBtn.textContent = editorMode === 'crop-define' ? '提交' : '应用编辑';
+
     editorCropBox = null;
     editorAspectRatio = null;
     editorDragType = null;
@@ -1681,7 +2011,7 @@ function openEditor(imageId) {
         fallback.onerror = () => { alert('图片加载失败'); closeEditor(); };
         fallback.src = `${API}/api/original/${imageId}`;
     };
-    img.src = `${API}/api/cutout/${imageId}`;
+    img.src = getCutoutImageUrl(imageId);
 }
 
 function initEditorCanvas() {
@@ -2144,6 +2474,9 @@ function constrainRatio(w, h, ratio) {
 
 function closeEditor() {
     document.getElementById('editorOverlay').classList.add('hidden');
+    // 重置保存按钮文案
+    const _saveBtn = document.querySelector('#editorOverlay .btn-primary');
+    if (_saveBtn) _saveBtn.textContent = '应用编辑';
     editorReady = false;
     editorImageId = null;
     editorCutoutImg = null;
@@ -2188,7 +2521,7 @@ async function saveMask() {
         expCanvas.width = ew;
         expCanvas.height = eh;
         const expCtx = expCanvas.getContext('2d');
-        const hasAlpha = editorCutoutImg.src.includes('cutout');
+        const hasAlpha = editorCutoutImg.src.includes('/api/cutout/');
         if (hasAlpha) {
             expCtx.clearRect(0, 0, ew, eh);
         } else {
@@ -2265,6 +2598,20 @@ async function saveMask() {
             return;
         }
 
+        // 图片裁切独立模式：存储 mask 到本地，不提交到后端
+        if (editorMode === 'crop-define') {
+            cropMasksByImageId[editorImageId] = maskBlob;
+            const idx = cropImages.findIndex(c => c.id === editorImageId);
+            if (idx >= 0) cropImages[idx].hasMask = true;
+            renderCropImages();
+            closeEditor();
+            // 处于队列模式时自动推进到下一张
+            if (window._cropQueueActive) {
+                openNextCropEditor();
+            }
+            return;
+        }
+
         // Default: edit existing result
         const form = collectConfig();
         form.append('mask', maskBlob, 'mask.png');
@@ -2300,7 +2647,7 @@ async function saveMask() {
                     <a class="btn btn-primary btn-sm" href="${API}${data.output_url}" download>下载</a>
                     <button class="btn btn-outline btn-sm" onclick="showPreview('${editorImageId}', '${API}${data.output_url}', '${meta ? meta.filename : ''}')">预览</button>
                     ${editHasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${editorImageId}')">修改抠图</button>` : ''}
-                    <button class="btn btn-outline btn-sm" onclick="openEditor('${editorImageId}')">再次编辑</button>
+                    <button class="btn btn-outline btn-sm" onclick="editorMode='modify';openEditor('${editorImageId}')">再次编辑</button>
                     <button class="btn btn-outline btn-sm" onclick="openReprocess('${data.run_id}', '${editorImageId}', '${editFeatures.join(',')}')">继续处理</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteResult('${newCard.id}')">删除</button>
                 </div>
@@ -2368,6 +2715,22 @@ function closePreview() {
     document.getElementById('previewProcessed').src = '';
 }
 
+// ─── 默认压缩输出设置加载 ───
+
+async function loadDefaultCompressSettings() {
+    try {
+        const res = await fetch(`${API}/api/config/default-compress`);
+        if (res.ok) {
+            const data = await res.json();
+            document.getElementById('outputFormat').value = data.output_format || 'JPEG';
+            document.getElementById('quality').value = data.quality || 90;
+            document.getElementById('qualityVal').textContent = (data.quality || 90) + '%';
+            document.getElementById('maxFileSize').value = data.max_file_size_kb || 0;
+            document.getElementById('maxWidth').value = data.max_width || 0;
+        }
+    } catch (e) {}
+}
+
 // ─── Settings Modal ───
 
 function handleSettingLogoUpload(files) {
@@ -2388,12 +2751,18 @@ function handleSettingLogoUpload(files) {
 
 function openSettings() {
     document.getElementById('settingThreads').value = localStorage.getItem('settingThreads') || 0;
-    document.getElementById('settingDisableArena').checked = localStorage.getItem('settingDisableArena') !== 'false';
+    document.getElementById('settingDisableArena').checked = localStorage.getItem('settingDisableArena') === 'true';
     // 当前CPU线程数
     const cores = navigator.hardwareConcurrency || '未知';
     document.getElementById('currentCpuCores').textContent = `当前CPU线程数: ${cores}`;
     const recommended = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
     document.getElementById('recommendedThreads').textContent = `推荐数量：${recommended}（核心数 - 1）`;
+    // 加载默认压缩输出设置
+    document.getElementById('settingOutputFormat').value = document.getElementById('outputFormat').value;
+    document.getElementById('settingQuality').value = document.getElementById('quality').value;
+    document.getElementById('settingQualityVal').textContent = document.getElementById('quality').value + '%';
+    document.getElementById('settingMaxWidth').value = document.getElementById('maxWidth').value;
+    document.getElementById('settingMaxFileSize').value = document.getElementById('maxFileSize').value;
     // 加载默认 Logo 配置
     document.getElementById('settingLogoPosition').value = defaultLogoConfig.position;
     document.getElementById('settingLogoRatio').value = Math.round(defaultLogoConfig.ratio * 100);
@@ -2428,6 +2797,28 @@ function saveSettings() {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: new URLSearchParams({threads, disable_arena: disableArena}),
+    });
+
+    // 保存默认压缩输出设置
+    const outFmt = document.getElementById('settingOutputFormat').value;
+    const outQual = parseInt(document.getElementById('settingQuality').value) || 90;
+    const outMaxW = parseInt(document.getElementById('settingMaxWidth').value) || 0;
+    const outMaxFS = parseInt(document.getElementById('settingMaxFileSize').value) || 0;
+    // 立即应用到主面板
+    document.getElementById('outputFormat').value = outFmt;
+    document.getElementById('quality').value = outQual;
+    document.getElementById('qualityVal').textContent = outQual + '%';
+    document.getElementById('maxWidth').value = outMaxW;
+    document.getElementById('maxFileSize').value = outMaxFS;
+    fetch(`${API}/api/config/default-compress`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+            output_format: outFmt,
+            quality: outQual,
+            max_width: outMaxW,
+            max_file_size_kb: outMaxFS,
+        }),
     });
 
     // 保存默认 Logo 配置
@@ -2577,7 +2968,7 @@ async function loadPersistedResults() {
             const cardId = r.run_id ? `result-${r.run_id}-${r.id}` : `result-${r.id}`;
             if (document.getElementById(cardId)) return;
             const features = r.features ? r.features.split(',').filter(Boolean) : [];
-            const hasBg = features.includes('bg');
+            const hasBg = (r.cutout_editable ?? features.includes('bg')) || (r.has_alpha_source ?? false);
             const card = document.createElement('div');
             card.className = 'result-card';
             card.id = cardId;
@@ -2605,7 +2996,6 @@ async function loadPersistedResults() {
                     <a class="btn btn-primary btn-sm" href="${API}${r.output_url}" download>下载</a>
                     <button class="btn btn-outline btn-sm" onclick="showPreview('${r.id}', '${API}${r.output_url}', '${escapeHtml(r.filename || '')}')">预览</button>
                     ${hasBg ? `<button class="btn btn-outline btn-sm" onclick="openCutoutEditor('${r.id}')">修改抠图</button>` : ''}
-                    <button class="btn btn-outline btn-sm" onclick="openEditor('${r.id}')">裁切</button>
                     <button class="btn btn-outline btn-sm" onclick="openReprocess('${r.run_id}', '${r.id}', '${r.features || ''}')">继续处理</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteResult('${cardId}')">删除</button>
                 </div>

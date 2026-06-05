@@ -4,3 +4,10 @@ temp/
 __pycache__/
 *.pyc
 .env
+build/dist/
+build/pyinstaller-work/
+build/pyinstaller-work-app/
+*.spec
+*.app
+*.exe
+tests/

@@ -1,12 +1,35 @@
 # Author: w2422 <z242235718@163.com>
 # Copyright (C) 2026 w2422. All rights reserved.
 
+import os
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-INPUT_DIR = BASE_DIR / "input"
-OUTPUT_DIR = BASE_DIR / "output"
-TEMP_DIR = BASE_DIR / "temp"
+
+def _is_frozen() -> bool:
+    """检测是否在 PyInstaller 打包环境中运行"""
+    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+
+
+def _get_base_dir() -> Path:
+    """获取应用源文件的基础目录（只读，打包后为 sys._MEIPASS）"""
+    if _is_frozen():
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
+def _get_data_dir() -> Path:
+    """获取可写数据目录，打包后重定向到 %LOCALAPPDATA%"""
+    if _is_frozen():
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "ImageProcessor"
+    return _get_base_dir()
+
+
+BASE_DIR = _get_base_dir()
+DATA_DIR = _get_data_dir()
+INPUT_DIR = DATA_DIR / "input"
+OUTPUT_DIR = DATA_DIR / "output"
+TEMP_DIR = DATA_DIR / "temp"
 ASSETS_DIR = BASE_DIR / "assets"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
@@ -17,6 +40,13 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
 # 处理控制
 CONCURRENT_PROCESS_LIMIT = 4
+# 背景移除(ONNX推理)并发数 — ONNX推理内存密集，设为1避免OOM
+CONCURRENT_BG_LIMIT = 1
+
+# JPG 抠图后体积目标：优先保画质，目标压到原图的 50%~75%
+JPEG_TARGET_RATIO_MIN = 0.50
+JPEG_TARGET_RATIO_MAX = 0.75
+JPEG_TARGET_QUALITY_FLOOR = 75
 
 # 文件清理（结果文件保留 7 天）
 CLEANUP_AGE_HOURS = 168
@@ -34,6 +64,12 @@ DEFAULT_LOGO_RATIO = 0.2
 DEFAULT_LOGO_OPACITY = 0.8
 DEFAULT_LOGO_MARGIN = 20
 
+# 默认压缩输出配置
+DEFAULT_OUTPUT_FORMAT = "JPEG"
+DEFAULT_QUALITY = 90
+DEFAULT_MAX_WIDTH = 0
+DEFAULT_MAX_FILE_SIZE_KB = 0
+
 # 文件签名 (magic bytes) 用于验证上传文件类型
 FILE_SIGNATURES = {
     b"\xff\xd8\xff": "image/jpeg",
@@ -44,6 +80,6 @@ FILE_SIGNATURES = {
     b"II\x2a\x00": "image/tiff",
 }
 
-# 确保目录存在
+# 确保目录存在（parents=True 支持跨驱动器创建路径链）
 for d in [INPUT_DIR, OUTPUT_DIR, TEMP_DIR]:
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
