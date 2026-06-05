@@ -8,6 +8,7 @@ build/dist/
 build/pyinstaller-work/
 build/pyinstaller-work-app/
 *.spec
+!build/*.spec
 *.app
 *.exe
 tests/
