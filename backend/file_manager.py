@@ -38,6 +38,47 @@ def get_session_temp_dir(session_id: str) -> Path:
     return d
 
 
+# ─── 结果/中间文件路径辅助 ───
+
+
+def get_cutout_path(image_id: str, session_id: str = "") -> Path:
+    """兼容旧版 cutout PNG 路径（供编辑器预览 / legacy 流程使用）"""
+    temp_dir = get_session_temp_dir(session_id) if session_id else TEMP_DIR
+    return temp_dir / f"{image_id}_cutout.png"
+
+
+def get_alpha_path(image_id: str, run_id: str = "", session_id: str = "") -> Path:
+    """alpha-only canonical 资产路径"""
+    temp_dir = get_session_temp_dir(session_id) if session_id else TEMP_DIR
+    if run_id:
+        return temp_dir / f"{image_id}_{run_id}_alpha.png"
+    return temp_dir / f"{image_id}_alpha.png"
+
+
+def get_probe_alpha_path(image_id: str, run_id: str = "", session_id: str = "") -> Path:
+    """alpha-only probe 小图资产路径（按需再放大为 canonical alpha）。"""
+    temp_dir = get_session_temp_dir(session_id) if session_id else TEMP_DIR
+    if run_id:
+        return temp_dir / f"{image_id}_{run_id}_alpha_probe.png"
+    return temp_dir / f"{image_id}_alpha_probe.png"
+
+
+def get_result_meta_path(image_id: str, run_id: str = "", session_id: str = "") -> Path:
+    """结果元数据路径"""
+    temp_dir = get_session_temp_dir(session_id) if session_id else TEMP_DIR
+    if run_id:
+        return temp_dir / f"{image_id}_{run_id}_meta.json"
+    return temp_dir / f"{image_id}_meta.json"
+
+
+def get_result_thumb_path(image_id: str, run_id: str = "", session_id: str = "") -> Path:
+    """结果缩略图路径"""
+    temp_dir = get_session_temp_dir(session_id) if session_id else TEMP_DIR
+    if run_id:
+        return temp_dir / f"{image_id}_{run_id}_result_thumb.png"
+    return temp_dir / f"{image_id}_result_thumb.png"
+
+
 # ─── 文件操作 ───
 
 

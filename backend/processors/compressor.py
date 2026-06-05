@@ -4,6 +4,12 @@
 import io
 from PIL import Image
 
+from config import (
+    JPEG_TARGET_RATIO_MIN,
+    JPEG_TARGET_RATIO_MAX,
+    JPEG_TARGET_QUALITY_FLOOR,
+)
+
 
 # PNG 颜色数阶梯（quality → 调色板颜色数；0 表示不量化）
 # 档位拉细让相邻 quality 档位输出大小有明显差异
@@ -35,13 +41,16 @@ def compress_image(
     quality: int = 85,
     max_file_size_kb: int = 0,
     max_width: int = 0,
+    original_file_size: int = 0,
+    prefer_target_jpeg_size: bool = False,
 ) -> bytes:
     """压缩图片并返回字节数据。
 
-    执行顺序：限宽缩放 → 格式转换 → 编码（含 max_file_size_kb 二分）。
+    执行顺序：限宽缩放 → 格式转换 → 编码（含 max_file_size_kb 二分 / 目标体积搜索）。
     裁切/蒙版裁切由调用方在 compress_image 之前完成。
     """
-    img = image.copy()
+    img = image
+    owned_imgs = []
 
     try:
         # 1) 限宽等比缩放
@@ -49,6 +58,7 @@ def compress_image(
             ratio = max_width / img.width
             new_height = int(img.height * ratio)
             img = img.resize((max_width, new_height), Image.LANCZOS)
+            owned_imgs.append(img)
 
         # 2) JPEG 不支持透明通道
         if output_format.upper() in ("JPEG", "JPG"):
@@ -56,9 +66,10 @@ def compress_image(
                 background = Image.new("RGB", img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[3])
                 img = background
-                del background  # 释放白底背景图
+                owned_imgs.append(img)
             elif img.mode != "RGB":
                 img = img.convert("RGB")
+                owned_imgs.append(img)
 
         fmt_upper = output_format.upper()
 
@@ -102,11 +113,66 @@ def compress_image(
                     return best_data
                 return _encode(img, output_format, 1)
 
+        if (
+            prefer_target_jpeg_size
+            and fmt_upper in ("JPEG", "JPG")
+            and original_file_size > 0
+        ):
+            return _encode_jpeg_to_target_ratio(img, output_format, quality, original_file_size)
+
         return _encode(img, output_format, quality)
     finally:
-        # 释放中间副本（可能为大图）
-        if img is not image:
-            del img
+        # 释放函数内部创建的中间图像（可能为大图）
+        for owned in reversed(owned_imgs):
+            if owned is not image:
+                try:
+                    owned.close()
+                except Exception:
+                    pass
+
+
+def _encode_jpeg_to_target_ratio(
+    img: Image.Image,
+    fmt: str,
+    preferred_quality: int,
+    original_file_size: int,
+) -> bytes:
+    """在画质优先前提下，将 JPG 输出控制在目标体积窗口附近。"""
+    min_target = max(1, int(original_file_size * JPEG_TARGET_RATIO_MIN))
+    max_target = max(min_target, int(original_file_size * JPEG_TARGET_RATIO_MAX))
+    quality_floor = max(1, min(95, JPEG_TARGET_QUALITY_FLOOR))
+    quality_ceiling = max(quality_floor, min(95, preferred_quality if preferred_quality > 0 else 95))
+
+    candidates = []
+    low, high = quality_floor, quality_ceiling
+    while low <= high:
+        mid = (low + high) // 2
+        data = _encode(img, fmt, mid)
+        size = len(data)
+        candidates.append((mid, size, data))
+        if min_target <= size <= max_target:
+            low = mid + 1
+        elif size < min_target:
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    if not candidates:
+        return _encode(img, fmt, quality_ceiling)
+
+    in_range = [c for c in candidates if min_target <= c[1] <= max_target]
+    if in_range:
+        return max(in_range, key=lambda item: (item[0], item[1]))[2]
+
+    under_limit = [c for c in candidates if c[1] <= max_target]
+    if under_limit:
+        return max(under_limit, key=lambda item: (item[0], item[1]))[2]
+
+    overs = [c for c in candidates if c[1] > max_target]
+    if overs:
+        return min(overs, key=lambda item: (item[1] - max_target, -item[0]))[2]
+
+    return max(candidates, key=lambda item: item[0])[2]
 
 
 def _encode(img: Image.Image, fmt: str, quality: int) -> bytes:

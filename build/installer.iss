@@ -3,7 +3,7 @@
 ; 下载: https://jrsoftware.org/isdl.php
 
 #define MyAppName "图片批量处理工具"
-#define MyAppVersion "0.0.4"
+#define MyAppVersion "0.0.5"
 #define MyAppPublisher "w2422"
 #define MyAppURL "http://127.0.0.1:8000"
 #define MyAppExeName "ImageBatchProcessor.exe"

@@ -5,13 +5,20 @@ import io
 from PIL import Image
 
 
-def generate_thumbnail(image: Image.Image, size: int = 200) -> bytes:
+def generate_thumbnail(image: Image.Image, size: int = 200, copy_image: bool = True) -> bytes:
     """生成缩略图，返回 PNG 字节"""
-    img = image.copy()
-    img.thumbnail((size, size), Image.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    img = image.copy() if copy_image else image
+    try:
+        img.thumbnail((size, size), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    finally:
+        if img is not image:
+            try:
+                img.close()
+            except Exception:
+                pass
 
 
 def get_image_size(image: Image.Image) -> tuple:

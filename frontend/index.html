@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="/frontend/style.css">
 </head>
 <body>
+    <!-- Toast 通知容器 -->
+    <div id="toastContainer" class="toast-container"></div>
     <!-- Header -->
     <header class="app-header">
         <div class="header-left">
@@ -359,6 +361,57 @@
                     </div>
                 </div>
 
+                <!-- Feature Toggle: 图片裁切 -->
+                <div class="feature-item" id="featureCrop">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enableCrop">
+                        <span class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </span>
+                    </label>
+                    <div class="feature-info" onclick="document.getElementById('enableCrop').click()">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1781" width="20" height="20"><path d="M736 672h80V208H352v80h384v384z m-448 64V64h-80v144H64v80h144v528h528v144h80v-144h144v-80H288z" fill="currentColor" p-id="1782"></path></svg>
+                        </div>
+                        <div class="feature-text">
+                            <span class="feature-name">图片裁切</span>
+                            <span class="feature-desc">框选保留区域，支持批量</span>
+                        </div>
+                    </div>
+                    <button class="feature-expand" onclick="toggleFeature('crop')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+                <div class="feature-params hidden" id="cropSection">
+                    <div class="param-row param-row--full">
+                        <div class="param-group">
+                            <label>上传裁切图片</label>
+                            <div class="crop-upload-zone" id="cropUploadZone">
+                                <input type="file" id="cropFileInput" multiple accept="image/*" style="display:none">
+                                <div class="upload-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                </div>
+                                <p class="upload-text">拖拽图片到此处，或 <span class="link">点击选择</span></p>
+                                <p class="upload-hint">上传后点击下方按钮开始批量处理</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="crop-image-grid" id="cropImageGrid"></div>
+                    <div class="crop-actions" id="cropActions">
+                        <button class="btn btn-primary" onclick="startCropBatchProcess()" id="cropStartBtn">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px;">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            开始批量处理
+                        </button>
+                        <p class="crop-actions-hint">按顺序为每张图片框选裁切区域，全部完成后自动处理</p>
+                    </div>
+                </div>
+
                 <!-- Feature Toggle: 压缩输出 -->
                 <div class="feature-item" id="featureCompress">
                     <label class="feature-toggle">
@@ -397,8 +450,8 @@
                         <div class="param-group">
                             <label>质量</label>
                             <div class="range-row">
-                                <input type="range" id="quality" min="1" max="100" value="85" step="1">
-                                <span class="value" id="qualityVal">85%</span>
+                                <input type="range" id="quality" min="1" max="100" value="90" step="1">
+                                <span class="value" id="qualityVal">90%</span>
                             </div>
                         </div>
                     </div>
@@ -410,14 +463,6 @@
                         <div class="param-group">
                             <label>最大宽度 (px，0=不限)</label>
                             <input type="number" id="maxWidth" value="0" min="0">
-                        </div>
-                    </div>
-                    <div class="param-row param-row--full">
-                        <div class="param-group">
-                            <label>蒙版裁切</label>
-                            <button class="btn btn-outline" id="openMaskCropBtn" type="button"
-                                    onclick="openMaskCropFromMain()" disabled>打开画板框选要保留的区域</button>
-                            <p class="param-hint" style="margin-top:6px">在弹出画板中用裁切框框选要保留的区域；裁切比例预设可锁定宽高比。点击「应用编辑」后裁切到选框区域。</p>
                         </div>
                     </div>
                 </div>
@@ -543,7 +588,7 @@
     <div class="modal-overlay hidden" id="editorOverlay">
         <div class="modal editor-modal">
             <div class="modal-header">
-                <h3>蒙版裁切</h3>
+                <h3>图片裁切</h3>
                 <button class="modal-close" onclick="closeEditor()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
@@ -721,6 +766,42 @@
                     </div>
                 </div>
                 </div>
+                <!-- Default Compress Settings -->
+                <div class="settings-section">
+                    <div class="settings-section-header" onclick="toggleSettingsSection('compressSettings')">
+                        <h4>默认压缩输出</h4>
+                        <svg class="settings-section-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div class="settings-section-content" id="compressSettingsContent">
+                        <div class="param-row" style="grid-template-columns:1fr 1fr;margin-top:8px">
+                            <div class="param-group">
+                                <label>输出格式</label>
+                                <select id="settingOutputFormat">
+                                    <option value="JPEG">JPEG</option>
+                                    <option value="WEBP">WEBP</option>
+                                    <option value="PNG">PNG</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label>质量</label>
+                                <div class="range-row">
+                                    <input type="range" id="settingQuality" min="1" max="100" value="90" step="1">
+                                    <span class="value" id="settingQualityVal">90%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="param-row" style="grid-template-columns:1fr 1fr;margin-top:8px">
+                            <div class="param-group">
+                                <label>最大宽度 (px，0=不限)</label>
+                                <input type="number" id="settingMaxWidth" value="0" min="0">
+                            </div>
+                            <div class="param-group">
+                                <label>最大文件 (KB，0=不限)</label>
+                                <input type="number" id="settingMaxFileSize" value="0" min="0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeSettings()">取消</button>
@@ -743,9 +824,12 @@
                     <div class="param-group">
                         <label>源图片</label>
                         <div class="reprocess-preview" id="reprocessPreview"></div>
+                        <div class="reprocess-error hidden" id="reprocessSourceError">
+                            <p style="color:var(--danger);margin:8px 0 0;font-size:13px;">源图片已不存在或无法打开</p>
+                        </div>
                     </div>
                 </div>
-                <!-- 去除背景 -->
+                <div id="reprocessFormBody">
                 <div class="settings-section" id="reprocessBg">
                     <div class="settings-section-header" onclick="toggleReprocessSection('reprocessBg')">
                         <h4 style="text-transform:none">去除背景（抠图）</h4>
@@ -974,6 +1058,25 @@
                         </div>
                     </div>
                 </div>
+                <!-- 图片裁切 -->
+                <div class="settings-section" id="reprocessCrop">
+                    <div class="settings-section-header" onclick="toggleReprocessSection('reprocessCrop')">
+                        <h4 style="text-transform:none">图片裁切</h4>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer" onclick="event.stopPropagation()">
+                            <input type="checkbox" id="reprocessCropEnabled" onchange="toggleReprocessSection('reprocessCrop')">
+                            启用
+                        </label>
+                    </div>
+                    <div class="settings-section-content" id="reprocessCropContent">
+                        <div class="param-row param-row--full" style="margin-top:8px">
+                            <div class="param-group">
+                                <button class="btn btn-outline" type="button"
+                                        onclick="openMaskCropFromReprocess()">打开画板框选要保留的区域</button>
+                                <p class="param-hint" style="margin-top:6px">在弹出画板中用裁切框框选要保留的区域；裁切比例预设可锁定宽高比。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <!-- 压缩 -->
                 <div class="settings-section" id="reprocessCompress">
                     <div class="settings-section-header" onclick="toggleReprocessSection('reprocessCompress')">
@@ -996,8 +1099,8 @@
                             <div class="param-group">
                                 <label>质量</label>
                                 <div class="range-row">
-                                    <input type="range" id="reprocessQuality" min="1" max="100" value="85" step="1">
-                                    <span class="value" id="reprocessQualityVal">85%</span>
+                                    <input type="range" id="reprocessQuality" min="1" max="100" value="90" step="1">
+                                    <span class="value" id="reprocessQualityVal">90%</span>
                                 </div>
                             </div>
                         </div>
@@ -1013,6 +1116,7 @@
                         </div>
                     </div>
                 </div>
+            </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeReprocess()">取消</button>
@@ -1039,7 +1143,7 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-        本工具由 <a href="https://www.gvnote.com" target="_blank" rel="noopener">w2422</a> 开发 | 未经允许不得用于商业用途
+        本工具由 w2422 开发 | 未经允许不得用于商业用途  | 若有商业用途,请联系: z242235718@163.com
     </footer>
 
     <script src="/frontend/app.js"></script>

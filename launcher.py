@@ -51,7 +51,7 @@ def main():
     print("=" * 60)
     print("         图片批量处理工具 (Image Processor)")
     print("=" * 60)
-    print(f"  版本: v0.0.4")
+    print(f"  版本: v0.0.5")
     print(f"  服务器地址:  http://{host}:{port}")
     print(f"  API 文档:    http://{host}:{port}/docs")
     print()
