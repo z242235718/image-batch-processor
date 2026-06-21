@@ -1165,17 +1165,20 @@ async function startProcess() {
         const form = collectConfig();
         // 告诉后端只处理当前上传的图片，避免处理已删除的旧图片
         form.append('image_ids', uploadedImages.map(i => i.id).join(','));
-        // 附加上传的裁切蒙版（批量裁切）
-        const cropIds = Object.keys(cropMasksByImageId);
-        if (cropIds.length > 0) {
-            const imageIdList = uploadedImages.map(i => i.id);
-            const maskArray = cropIds.map(id => cropMasksByImageId[id]);
-            for (let i = 0; i < imageIdList.length; i++) {
-                const maskIdx = Math.min(i, maskArray.length - 1);
-                const blob = maskArray[maskIdx];
+        // 附加上传的裁切蒙版（按 ID 匹配，而非索引）
+        // 遍历主面板图片，只对在 cropMasksByImageId 中有对应蒙版的图片挂载蒙版
+        const uploadedIdList = uploadedImages.map(i => i.id);
+        let hasAnyCropMask = false;
+        for (let i = 0; i < uploadedIdList.length; i++) {
+            const id = uploadedIdList[i];
+            const blob = cropMasksByImageId[id];
+            if (blob) {
                 form.append(`mask_${i}`, blob, `mask_${i}.png`);
+                hasAnyCropMask = true;
             }
-            form.append('crop_mask_count', imageIdList.length);
+        }
+        if (hasAnyCropMask) {
+            form.append('crop_mask_count', uploadedIdList.length);
         }
         const res = await fetch(`${API}/api/process`, { method: 'POST', body: form });
         const data = await res.json();
@@ -2512,13 +2515,13 @@ async function saveMask() {
     let maskBlob;
 
     if (needsExpand) {
-        // Expanded canvas bounds: union of image and crop box
-        const ex = Math.min(0, cb.x);
-        const ey = Math.min(0, cb.y);
-        const ew = Math.max(IW, cb.x + cb.w) - ex;
-        const eh = Math.max(IH, cb.y + cb.h) - ey;
-        const ox = -ex;  // image top-left in expanded canvas
-        const oy = -ey;
+        // Expanded canvas = crop box size (not union of image and crop box)
+        // This ensures the output matches the crop box dimensions exactly,
+        // preserving any aspect ratio constraint (1:1, 4:3, etc.)
+        const ew = cb.w;
+        const eh = cb.h;
+        const ox = -cb.x;  // image top-left in expanded canvas
+        const oy = -cb.y;
 
         // 1. Create padded image (white fill for regular, transparent for cutout)
         const expCanvas = document.createElement('canvas');
@@ -2604,9 +2607,17 @@ async function saveMask() {
 
         // 图片裁切独立模式：存储 mask 到本地，不提交到后端
         if (editorMode === 'crop-define') {
-            cropMasksByImageId[editorImageId] = maskBlob;
+            // 扩大画布场景：mask 需绑定到 padded 新图片的 ID，而非原图 ID
+            const imgId = needsExpand ? targetId : editorImageId;
+            cropMasksByImageId[imgId] = maskBlob;
             const idx = cropImages.findIndex(c => c.id === editorImageId);
-            if (idx >= 0) cropImages[idx].hasMask = true;
+            if (idx >= 0) {
+                if (needsExpand) {
+                    // 替换 cropImages 中的记录，指向 padded 新图片
+                    cropImages[idx].id = targetId;
+                }
+                cropImages[idx].hasMask = true;
+            }
             renderCropImages();
             closeEditor();
             // 处于队列模式时自动推进到下一张
