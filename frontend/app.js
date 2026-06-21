@@ -534,7 +534,7 @@ function handleFiles(files) {
             const data = JSON.parse(xhr.responseText);
             uploadedImages.push(...data.images);
             renderImages();
-            uploadProgressText.textContent = `上传完成，${data.total} 张图片`;
+            uploadProgressText.textContent = `上传完成，${uploadedImages.length} 张图片`;
         } else {
             uploadProgressText.textContent = '上传失败';
         }
@@ -1388,6 +1388,8 @@ function updateProgress(data) {
             if (currentBatchId !== _doneBatchId) return; // 用户已开始新一批，跳过
             uploadedImages = [];
             renderImages();
+            uploadProgressText.textContent = '';
+            uploadProgress.style.display = 'none';
         }, 500);
     } else {
         document.getElementById('progressSection').classList.remove('hidden');
@@ -1816,6 +1818,8 @@ async function clearAll() {
     cropImages = [];
     cropMasksByImageId = {};
     renderImages();
+    uploadProgressText.textContent = '';
+    uploadProgress.style.display = 'none';
     renderCropImages();
     document.getElementById('progressSection').classList.add('hidden');
     document.getElementById('downloadAllBtn').classList.add('hidden');
